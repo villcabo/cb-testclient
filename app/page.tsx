@@ -85,7 +85,7 @@ export default function PaymentClient() {
       setLoading(true)
       console.log("[v0] Requesting token...")
 
-      const response = await fetch("https://stage.api.sintesis.com.bo/crossborder/v1/auth/token", {
+      const response = await fetch("/api/auth/token", {
         method: "GET",
         headers: { "X-API-Key": apiKey }
       })
