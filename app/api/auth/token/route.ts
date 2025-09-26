@@ -2,11 +2,12 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    const { apiKey } = await request.json()
+    const { apiKey, baseUrl } = await request.json()
 
     console.log("[v0] Attempting to get token with API key:", apiKey?.substring(0, 20) + "...")
+    console.log("[v0] Using base URL:", baseUrl)
 
-    const response = await fetch("https://stage.api.sintesis.com.bo/crossborder/v1/auth/token", {
+    const response = await fetch(`${baseUrl}/crossborder/v1/auth/token`, {
       method: "GET",
       headers: {
         "X-API-Key": apiKey,

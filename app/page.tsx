@@ -36,6 +36,7 @@ export default function PaymentClient() {
     "config" | "qr-input" | "amount-input" | "confirmation" | "success"
   >("config")
   const [apiKey, setApiKey] = useState("")
+  const [apiBaseUrl, setApiBaseUrl] = useState("https://stage.api.sintesis.com.bo")
   const [token, setToken] = useState("")
   const [qrCode, setQrCode] = useState("")
   const [amount, setAmount] = useState("")
@@ -56,10 +57,13 @@ export default function PaymentClient() {
   })
 
   useEffect(() => {
-    // Load saved API key
     const savedApiKey = localStorage.getItem("payment-api-key")
+    const savedApiBaseUrl = localStorage.getItem("payment-api-base-url")
     if (savedApiKey) {
       setApiKey(savedApiKey)
+    }
+    if (savedApiBaseUrl) {
+      setApiBaseUrl(savedApiBaseUrl)
     }
   }, [])
 
@@ -72,10 +76,19 @@ export default function PaymentClient() {
       })
       return
     }
+    if (!apiBaseUrl.trim()) {
+      toast({
+        title: "Error",
+        description: "Por favor ingresa una URL base válida",
+        variant: "destructive",
+      })
+      return
+    }
     localStorage.setItem("payment-api-key", apiKey)
+    localStorage.setItem("payment-api-base-url", apiBaseUrl)
     toast({
-      title: "API Key guardada",
-      description: "La API Key se ha guardado correctamente",
+      title: "Configuración guardada",
+      description: "La API Key y URL base se han guardado correctamente",
     })
     setCurrentScreen("qr-input")
   }
@@ -88,7 +101,7 @@ export default function PaymentClient() {
       const response = await fetch("/api/auth/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey }),
+        body: JSON.stringify({ apiKey, baseUrl: apiBaseUrl }),
       })
 
       if (!response.ok) {
@@ -144,6 +157,7 @@ export default function PaymentClient() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
+          "X-Base-URL": apiBaseUrl,
         },
         body: JSON.stringify(requestBody),
       })
@@ -186,6 +200,7 @@ export default function PaymentClient() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-Base-URL": apiBaseUrl,
         },
         body: JSON.stringify({
           txCode: paymentData.txCode,
@@ -221,6 +236,7 @@ export default function PaymentClient() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "X-Base-URL": apiBaseUrl,
         },
         body: JSON.stringify({
           txCode: paymentData.txCode,
@@ -264,9 +280,19 @@ export default function PaymentClient() {
             <Settings className="w-6 h-6 text-primary" />
           </div>
           <CardTitle>Configuración API</CardTitle>
-          <CardDescription>Configura tu API Key para comenzar a realizar pruebas</CardDescription>
+          <CardDescription>Configura tu API Key y URL base para comenzar a realizar pruebas</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="apiBaseUrl">URL Base de la API</Label>
+            <Input
+              id="apiBaseUrl"
+              type="url"
+              placeholder="https://stage.api.sintesis.com.bo"
+              value={apiBaseUrl}
+              onChange={(e) => setApiBaseUrl(e.target.value)}
+            />
+          </div>
           <div className="space-y-2">
             <Label htmlFor="apiKey">API Key</Label>
             <Input
@@ -277,7 +303,7 @@ export default function PaymentClient() {
               onChange={(e) => setApiKey(e.target.value)}
             />
           </div>
-          <Button onClick={saveApiKey} className="w-full" disabled={!apiKey.trim()}>
+          <Button onClick={saveApiKey} className="w-full" disabled={!apiKey.trim() || !apiBaseUrl.trim()}>
             Guardar y Continuar
           </Button>
         </CardContent>
