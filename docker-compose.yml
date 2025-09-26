@@ -1,0 +1,12 @@
+name: cb-testclient
+
+services:
+  app:
+    image: cr.sintesis.com.bo/crossborder-dev/cb-testclient:latest
+    container_name: cb-testclient
+    restart: unless-stopped
+    ports:
+      - "${PORT:-0.0.0.0:3000}:3000"
+    environment:
+      NODE_ENV: production
+      GITHUB_PAGES: true
