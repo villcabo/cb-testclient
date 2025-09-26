@@ -86,8 +86,9 @@ export default function PaymentClient() {
       console.log("[v0] Requesting token...")
 
       const response = await fetch("/api/auth/token", {
-        method: "GET",
-        headers: { "X-API-Key": apiKey }
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey }),
       })
 
       if (!response.ok) {
