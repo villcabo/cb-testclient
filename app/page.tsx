@@ -41,6 +41,7 @@ interface PaymentData {
     identificationNumber: string
     branchOffice: string
   }
+  completedDate?: string
 }
 
 interface WebhookLog {
@@ -51,6 +52,8 @@ interface WebhookLog {
   body: any
   error?: string
   status: "success" | "error"
+  processedData?: any
+  nextAction?: string
 }
 
 export default function PaymentClient() {
@@ -121,6 +124,10 @@ export default function PaymentClient() {
     const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
     setWebhookLogs(updatedLogs)
     localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+
+    if (log.processedData && log.nextAction) {
+      handleWebhookAction(log.processedData, log.nextAction)
+    }
   }
 
   const clearWebhookLogs = () => {
@@ -359,6 +366,56 @@ export default function PaymentClient() {
     setAmount("")
     setPaymentData({})
     setStatus("idle")
+  }
+
+  const handleWebhookAction = (processedData: any, nextAction: string) => {
+    switch (nextAction) {
+      case "show_confirmation":
+        setPaymentData({
+          txCode: processedData.txCode,
+          order: processedData.order,
+          collector: processedData.collector,
+        })
+        setStatus("ready_to_confirm")
+        setCurrentScreen("confirmation")
+        toast({
+          title: "QR Procesado",
+          description: "Monto cerrado detectado. Confirma el pago.",
+        })
+        break
+
+      case "show_amount_input":
+        setPaymentData({
+          txCode: processedData.txCode,
+        })
+        setStatus("waiting_amount")
+        setCurrentScreen("amount-input")
+        toast({
+          title: "Monto Requerido",
+          description: "Ingresa el monto para continuar.",
+        })
+        break
+
+      case "show_success":
+        setPaymentData((prev) => ({
+          ...prev,
+          completedDate: processedData.completedDate,
+        }))
+        setStatus("completed")
+        setCurrentScreen("success")
+        toast({
+          title: "Pago Completado",
+          description: "La transacción se procesó exitosamente.",
+        })
+        break
+
+      case "show_refund_notification":
+        toast({
+          title: processedData.isPartial ? "Reembolso Parcial" : "Reembolso Total",
+          description: `${processedData.amount} ${processedData.currency} reembolsado`,
+        })
+        break
+    }
   }
 
   const renderConfigScreen = () => (
@@ -621,6 +678,9 @@ export default function PaymentClient() {
               PROCESSING
             </Badge>
             <div className="mt-2 text-sm text-muted-foreground">Código: {paymentData.txCode}</div>
+            {paymentData.completedDate && (
+              <div className="mt-2 text-sm text-muted-foreground">Fecha de Completado: {paymentData.completedDate}</div>
+            )}
           </div>
 
           <Button onClick={resetFlow} className="w-full">
@@ -683,6 +743,27 @@ export default function PaymentClient() {
                         <Badge variant={log.status === "success" ? "default" : "destructive"} className="text-xs">
                           {log.method}
                         </Badge>
+                        {log.body?.type && (
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs ${
+                              log.body.type === "PREVIEW"
+                                ? "bg-blue-100 text-blue-800"
+                                : log.body.type === "CONFIRM"
+                                  ? "bg-green-100 text-green-800"
+                                  : log.body.type === "REFUND"
+                                    ? "bg-orange-100 text-orange-800"
+                                    : ""
+                            }`}
+                          >
+                            {log.body.type}
+                          </Badge>
+                        )}
+                        {log.body?.status && (
+                          <Badge variant="outline" className="text-xs">
+                            {log.body.status}
+                          </Badge>
+                        )}
                         <span className="text-sm font-mono">{new Date(log.timestamp).toLocaleString()}</span>
                       </div>
                       <Badge variant="outline" className={log.status === "success" ? "text-green-600" : "text-red-600"}>
@@ -690,19 +771,47 @@ export default function PaymentClient() {
                       </Badge>
                     </div>
 
+                    {log.body?.txCode && (
+                      <div className="text-sm bg-muted p-2 rounded">
+                        <strong>TX Code:</strong> <span className="font-mono">{log.body.txCode}</span>
+                        {log.body.externalReferentId && (
+                          <>
+                            <br />
+                            <strong>External Ref:</strong>{" "}
+                            <span className="font-mono">{log.body.externalReferentId}</span>
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     {log.error && (
                       <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/20 p-2 rounded">
                         <strong>Error:</strong> {log.error}
                       </div>
                     )}
 
-                    {log.body && (
-                      <div className="text-sm">
-                        <div className="font-medium mb-1">Body:</div>
-                        <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
-                          {JSON.stringify(log.body, null, 2)}
-                        </pre>
+                    {log.nextAction && (
+                      <div className="text-sm text-blue-600 bg-blue-50 dark:bg-blue-950/20 p-2 rounded">
+                        <strong>Acción:</strong> {log.nextAction}
                       </div>
+                    )}
+
+                    {log.body && (
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" size="sm" className="text-xs">
+                            Ver Detalles Completos <ChevronDown className="w-3 h-3 ml-1" />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="text-sm mt-2">
+                            <div className="font-medium mb-1">Body:</div>
+                            <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                              {JSON.stringify(log.body, null, 2)}
+                            </pre>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
                     )}
 
                     <Collapsible>
