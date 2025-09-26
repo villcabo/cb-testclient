@@ -8,7 +8,19 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { QrCode, Settings, CreditCard, CheckCircle, AlertCircle, Loader2 } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  QrCode,
+  Settings,
+  CreditCard,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  Activity,
+  ChevronDown,
+  Trash2,
+  Eye,
+} from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 type PaymentStatus = "idle" | "preview" | "waiting_amount" | "ready_to_confirm" | "processing" | "completed" | "error"
@@ -31,6 +43,16 @@ interface PaymentData {
   }
 }
 
+interface WebhookLog {
+  id: string
+  timestamp: string
+  method: string
+  headers: Record<string, string>
+  body: any
+  error?: string
+  status: "success" | "error"
+}
+
 export default function PaymentClient() {
   const [currentScreen, setCurrentScreen] = useState<
     "config" | "qr-input" | "amount-input" | "confirmation" | "success"
@@ -43,6 +65,8 @@ export default function PaymentClient() {
   const [paymentData, setPaymentData] = useState<PaymentData>({})
   const [status, setStatus] = useState<PaymentStatus>("idle")
   const [loading, setLoading] = useState(false)
+  const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
+  const [showWebhookLogs, setShowWebhookLogs] = useState(false)
   const { toast } = useToast()
 
   // Default user data
@@ -59,13 +83,78 @@ export default function PaymentClient() {
   useEffect(() => {
     const savedApiKey = localStorage.getItem("payment-api-key")
     const savedApiBaseUrl = localStorage.getItem("payment-api-base-url")
+    const savedWebhookLogs = localStorage.getItem("webhook-logs")
+
     if (savedApiKey) {
       setApiKey(savedApiKey)
     }
     if (savedApiBaseUrl) {
       setApiBaseUrl(savedApiBaseUrl)
     }
+    if (savedWebhookLogs) {
+      try {
+        setWebhookLogs(JSON.parse(savedWebhookLogs))
+      } catch (error) {
+        console.error("Error loading webhook logs:", error)
+      }
+    }
+
+    const pollWebhookLogs = () => {
+      // This would typically be replaced with WebSocket or SSE
+      // For now, we'll just check localStorage periodically
+      const currentLogs = localStorage.getItem("webhook-logs")
+      if (currentLogs) {
+        try {
+          const logs = JSON.parse(currentLogs)
+          setWebhookLogs(logs)
+        } catch (error) {
+          console.error("Error parsing webhook logs:", error)
+        }
+      }
+    }
+
+    const interval = setInterval(pollWebhookLogs, 2000)
+    return () => clearInterval(interval)
   }, [])
+
+  const saveWebhookLog = (log: WebhookLog) => {
+    const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
+    setWebhookLogs(updatedLogs)
+    localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+  }
+
+  const clearWebhookLogs = () => {
+    setWebhookLogs([])
+    localStorage.removeItem("webhook-logs")
+    toast({
+      title: "Logs limpiados",
+      description: "Se han eliminado todos los logs de webhook",
+    })
+  }
+
+  const testWebhook = async () => {
+    try {
+      const response = await fetch("/api/webhook", {
+        method: "GET",
+      })
+      const data = await response.json()
+
+      if (data.logData) {
+        saveWebhookLog(data.logData)
+      }
+
+      toast({
+        title: "Webhook probado",
+        description: "Se ha enviado una llamada de prueba al webhook",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo probar el webhook",
+        variant: "destructive",
+      })
+    }
+  }
 
   const saveApiKey = () => {
     if (!apiKey.trim()) {
@@ -542,6 +631,104 @@ export default function PaymentClient() {
     </div>
   )
 
+  const renderWebhookLogsPanel = () => (
+    <Card className="mt-6">
+      <Collapsible open={showWebhookLogs} onOpenChange={setShowWebhookLogs}>
+        <CollapsibleTrigger asChild>
+          <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center">
+                  <Activity className="w-4 h-4 text-blue-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Logs de Webhook</CardTitle>
+                  <CardDescription>{webhookLogs.length} llamadas registradas</CardDescription>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-xs">
+                  {webhookLogs.filter((log) => log.status === "success").length} exitosas
+                </Badge>
+                <ChevronDown className={`w-4 h-4 transition-transform ${showWebhookLogs ? "rotate-180" : ""}`} />
+              </div>
+            </div>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0">
+            <div className="flex gap-2 mb-4">
+              <Button onClick={testWebhook} variant="outline" size="sm">
+                <Eye className="w-4 h-4 mr-2" />
+                Probar Webhook
+              </Button>
+              <Button onClick={clearWebhookLogs} variant="outline" size="sm" disabled={webhookLogs.length === 0}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Limpiar Logs
+              </Button>
+            </div>
+
+            {webhookLogs.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p>No hay llamadas de webhook registradas</p>
+                <p className="text-sm">Las llamadas aparecerán aquí automáticamente</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {webhookLogs.map((log) => (
+                  <div key={log.id} className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={log.status === "success" ? "default" : "destructive"} className="text-xs">
+                          {log.method}
+                        </Badge>
+                        <span className="text-sm font-mono">{new Date(log.timestamp).toLocaleString()}</span>
+                      </div>
+                      <Badge variant="outline" className={log.status === "success" ? "text-green-600" : "text-red-600"}>
+                        {log.status}
+                      </Badge>
+                    </div>
+
+                    {log.error && (
+                      <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/20 p-2 rounded">
+                        <strong>Error:</strong> {log.error}
+                      </div>
+                    )}
+
+                    {log.body && (
+                      <div className="text-sm">
+                        <div className="font-medium mb-1">Body:</div>
+                        <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                          {JSON.stringify(log.body, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+
+                    <Collapsible>
+                      <CollapsibleTrigger asChild>
+                        <Button variant="ghost" size="sm" className="text-xs">
+                          Ver Headers <ChevronDown className="w-3 h-3 ml-1" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="text-sm mt-2">
+                          <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                            {JSON.stringify(log.headers, null, 2)}
+                          </pre>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
+  )
+
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="container mx-auto py-8">
@@ -555,6 +742,8 @@ export default function PaymentClient() {
         {currentScreen === "amount-input" && renderAmountInputScreen()}
         {currentScreen === "confirmation" && renderConfirmationScreen()}
         {currentScreen === "success" && renderSuccessScreen()}
+
+        {currentScreen !== "config" && renderWebhookLogsPanel()}
       </div>
     </div>
   )
