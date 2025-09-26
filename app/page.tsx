@@ -87,7 +87,7 @@ export default function PaymentClient() {
 
       const response = await fetch("https://stage.api.sintesis.com.bo/crossborder/v1/auth/token", {
         method: "GET",
-        headers: { "X-API-Key": {{ apiKey }} }
+        headers: { "X-API-Key": apiKey }
       })
 
       if (!response.ok) {
