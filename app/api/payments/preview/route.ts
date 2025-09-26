@@ -4,7 +4,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const authHeader = request.headers.get("authorization")
-    const baseUrl = request.headers.get("x-base-url") || "https://stage.api.sintesis.com.bo"
+    const baseUrl = request.headers.get("x-base-url") || "https://stage-api.sintesis.com.bo"
 
     console.log("[v0] Preview payment request body:", JSON.stringify(body, null, 2))
     console.log("[v0] Authorization header:", authHeader?.substring(0, 20) + "...")
@@ -46,7 +46,7 @@ export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
     const authHeader = request.headers.get("authorization")
-    const baseUrl = request.headers.get("x-base-url") || "https://stage.api.sintesis.com.bo"
+    const baseUrl = request.headers.get("x-base-url") || "https://stage-api.sintesis.com.bo"
 
     console.log("[v0] Set amount request body:", JSON.stringify(body, null, 2))
     console.log("[v0] Using base URL:", baseUrl)

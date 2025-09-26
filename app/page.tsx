@@ -36,7 +36,7 @@ export default function PaymentClient() {
     "config" | "qr-input" | "amount-input" | "confirmation" | "success"
   >("config")
   const [apiKey, setApiKey] = useState("")
-  const [apiBaseUrl, setApiBaseUrl] = useState("https://stage.api.sintesis.com.bo")
+  const [apiBaseUrl, setApiBaseUrl] = useState("https://stage-api.sintesis.com.bo")
   const [token, setToken] = useState("")
   const [qrCode, setQrCode] = useState("")
   const [amount, setAmount] = useState("")
@@ -288,7 +288,7 @@ export default function PaymentClient() {
             <Input
               id="apiBaseUrl"
               type="url"
-              placeholder="https://stage.api.sintesis.com.bo"
+              placeholder="https://stage-api.sintesis.com.bo"
               value={apiBaseUrl}
               onChange={(e) => setApiBaseUrl(e.target.value)}
             />
