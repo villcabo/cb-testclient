@@ -1,5 +1,7 @@
-import { NextRequest } from "next/server"
+import type { NextRequest } from "next/server"
 import crypto from "crypto"
+
+export const dynamic = "force-dynamic"
 
 // Store active SSE connections
 const connections = new Map<string, ReadableStreamDefaultController>()
@@ -13,19 +15,23 @@ export async function GET(request: NextRequest) {
       connections.set(clientId, controller)
 
       // Send initial connection message
-      controller.enqueue(`data: ${JSON.stringify({
-        type: 'connection',
-        clientId,
-        message: 'Conexión SSE establecida'
-      })}\n\n`)
+      controller.enqueue(
+        `data: ${JSON.stringify({
+          type: "connection",
+          clientId,
+          message: "Conexión SSE establecida",
+        })}\n\n`,
+      )
 
       // Keep connection alive with periodic pings
       const keepAlive = setInterval(() => {
         try {
-          controller.enqueue(`data: ${JSON.stringify({
-            type: 'ping',
-            timestamp: new Date().toISOString()
-          })}\n\n`)
+          controller.enqueue(
+            `data: ${JSON.stringify({
+              type: "ping",
+              timestamp: new Date().toISOString(),
+            })}\n\n`,
+          )
         } catch (error) {
           clearInterval(keepAlive)
           connections.delete(clientId)
@@ -33,7 +39,7 @@ export async function GET(request: NextRequest) {
       }, 30000) // Ping every 30 seconds
 
       // Cleanup on close
-      request.signal.addEventListener('abort', () => {
+      request.signal.addEventListener("abort", () => {
         clearInterval(keepAlive)
         connections.delete(clientId)
         try {
@@ -42,26 +48,26 @@ export async function GET(request: NextRequest) {
           // Connection already closed
         }
       })
-    }
+    },
   })
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET',
-      'Access-Control-Allow-Headers': 'Cache-Control'
-    }
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET",
+      "Access-Control-Allow-Headers": "Cache-Control",
+    },
   })
 }
 
 // Function to broadcast webhook logs to all connected clients
 export function broadcastWebhookLog(webhookLog: any) {
   const message = JSON.stringify({
-    type: 'webhook-log',
-    data: webhookLog
+    type: "webhook-log",
+    data: webhookLog,
   })
 
   connections.forEach((controller, clientId) => {

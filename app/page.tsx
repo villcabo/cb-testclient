@@ -70,7 +70,7 @@ export default function PaymentClient() {
   const [loading, setLoading] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
   const [showWebhookLogs, setShowWebhookLogs] = useState(true) // Cambiar a true por defecto para mostrar logs inmediatamente
-  const [sseConnectionStatus, setSseConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
+  const [pollingStatus, setPollingStatus] = useState<"active" | "inactive">("inactive")
   const { toast } = useToast()
 
   // Default user data
@@ -110,72 +110,46 @@ export default function PaymentClient() {
       setCurrentScreen("config")
     }
 
-    // Conectar a SSE para recibir webhook logs en tiempo real
-    const eventSource = new EventSource('/api/webhook-stream')
-
-    eventSource.onopen = () => {
-      console.log('SSE connection established')
-      setSseConnectionStatus('connected')
-    }
-
-    eventSource.onmessage = (event) => {
+    setPollingStatus("active")
+    const pollWebhookLogs = async () => {
       try {
-        const data = JSON.parse(event.data)
+        const response = await fetch("/api/webhook-logs")
+        if (response.ok) {
+          const data = await response.json()
+          if (data.logs && data.logs.length > 0) {
+            setWebhookLogs((prevLogs) => {
+              const newLogs = data.logs.filter(
+                (newLog: WebhookLog) => !prevLogs.some((existingLog) => existingLog.id === newLog.id),
+              )
 
-        if (data.type === 'webhook-log') {
-          const webhookLog = data.data
+              if (newLogs.length > 0) {
+                const updatedLogs = [...newLogs, ...prevLogs].slice(0, 50)
+                localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
 
-          // Actualizar logs inmediatamente
-          setWebhookLogs(prevLogs => {
-            const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
-            localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
-            return updatedLogs
-          })
+                // Handle webhook actions for new logs
+                newLogs.forEach((log: WebhookLog) => {
+                  if (log.processedData && log.nextAction) {
+                    handleWebhookAction(log.processedData, log.nextAction)
+                  }
+                })
 
-          // Manejar acciones del webhook si las hay
-          if (webhookLog.processedData && webhookLog.nextAction) {
-            handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
+                return updatedLogs
+              }
+              return prevLogs
+            })
           }
-
-          // Mostrar notificación toast
-          if (webhookLog.body?.type) {
-            const typeMessages = {
-              'PREVIEW': 'Webhook Preview recibido',
-              'CONFIRM': 'Webhook Confirm recibido',
-              'REFUND': 'Webhook Refund recibido'
-            }
-
-            console.log("Webhook received via SSE:", webhookLog)
-
-            //toast({
-            //  title: "Webhook Recibido",
-            //  description: typeMessages[webhookLog.body.type] || "Nuevo webhook recibido",
-            //})
-          }
-        } else if (data.type === 'connection') {
-          console.log('SSE connected with client ID:', data.clientId)
-          setSseConnectionStatus('connected')
         }
       } catch (error) {
-        console.error('Error parsing SSE message:', error)
+        console.error("Error polling webhook logs:", error)
       }
     }
 
-    eventSource.onerror = (error) => {
-      console.error('SSE error:', error)
-      setSseConnectionStatus('disconnected')
-      // Reconectar automáticamente después de un error
-      setTimeout(() => {
-        if (eventSource.readyState === EventSource.CLOSED) {
-          console.log('Attempting to reconnect SSE...')
-          setSseConnectionStatus('connecting')
-        }
-      }, 5000)
-    }
+    // Poll every 2 seconds
+    const pollInterval = setInterval(pollWebhookLogs, 2000)
 
-    // Cleanup al desmontar el componente
     return () => {
-      eventSource.close()
+      clearInterval(pollInterval)
+      setPollingStatus("inactive")
     }
   }, [])
 
@@ -189,9 +163,17 @@ export default function PaymentClient() {
     }
   }
 
-  const clearWebhookLogs = () => {
+  const clearWebhookLogs = async () => {
     setWebhookLogs([])
     localStorage.removeItem("webhook-logs")
+
+    // Also clear server-side logs
+    try {
+      await fetch("/api/webhook-logs", { method: "DELETE" })
+    } catch (error) {
+      console.error("Error clearing server logs:", error)
+    }
+
     toast({
       title: "Logs limpiados",
       description: "Se han eliminado todos los logs de webhook",
@@ -751,10 +733,10 @@ export default function PaymentClient() {
   )
 
   const renderWebhookLogsPanel = () => (
-    <Card className="mt-6">
+    <Card className="h-full">
       <Collapsible open={showWebhookLogs} onOpenChange={setShowWebhookLogs}>
         <CollapsibleTrigger asChild>
-          <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+          <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors pb-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center">
@@ -766,19 +748,12 @@ export default function PaymentClient() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {/* Indicador de conexión SSE */}
                 <div className="flex items-center gap-1">
                   <div
-                    className={`w-2 h-2 rounded-full ${
-                      sseConnectionStatus === 'connected' ? 'bg-green-500' :
-                      sseConnectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
-                      'bg-red-500'
-                    }`}
+                    className={`w-2 h-2 rounded-full ${pollingStatus === "active" ? "bg-green-500" : "bg-red-500"}`}
                   />
                   <span className="text-xs text-muted-foreground">
-                    {sseConnectionStatus === 'connected' ? 'Conectado' :
-                     sseConnectionStatus === 'connecting' ? 'Conectando...' :
-                     'Desconectado'}
+                    {pollingStatus === "active" ? "Monitoreando" : "Inactivo"}
                   </span>
                 </div>
                 <Badge variant="outline" className="text-xs">
@@ -790,7 +765,7 @@ export default function PaymentClient() {
           </CardHeader>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="pt-0">
+          <CardContent className="pt-0 h-[calc(100vh-320px)]">
             <div className="flex gap-2 mb-4">
               <Button onClick={testWebhook} variant="outline" size="sm">
                 <Eye className="w-4 h-4 mr-2" />
@@ -809,7 +784,7 @@ export default function PaymentClient() {
                 <p className="text-sm">Las llamadas aparecerán aquí automáticamente</p>
               </div>
             ) : (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
+              <div className="space-y-3 h-full overflow-y-auto pr-2">
                 {webhookLogs.map((log) => (
                   <div key={log.id} className="border rounded-lg p-3 space-y-2">
                     <div className="flex items-center justify-between">
@@ -922,20 +897,11 @@ export default function PaymentClient() {
               <h1 className="text-lg font-semibold">Cliente de Pruebas</h1>
               <p className="text-xs text-muted-foreground">API de pagos cross-border</p>
             </div>
-            {/* Indicador de conexión SSE en la barra superior */}
             {currentScreen !== "config" && (
               <div className="flex items-center gap-2">
-                <div
-                  className={`w-2 h-2 rounded-full ${
-                    sseConnectionStatus === 'connected' ? 'bg-green-500' :
-                    sseConnectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
-                    'bg-red-500'
-                  }`}
-                />
+                <div className={`w-2 h-2 rounded-full ${pollingStatus === "active" ? "bg-green-500" : "bg-red-500"}`} />
                 <span className="text-xs text-muted-foreground">
-                  {sseConnectionStatus === 'connected' ? 'Conectado' :
-                   sseConnectionStatus === 'connecting' ? 'Conectando...' :
-                   'Desconectado'}
+                  {pollingStatus === "active" ? "Monitoreando" : "Inactivo"}
                 </span>
               </div>
             )}
@@ -951,167 +917,7 @@ export default function PaymentClient() {
           // Layout de dos columnas para las demás pantallas
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-120px)]">
             {/* Columna izquierda - Logs de Webhook */}
-            <div className="order-2 lg:order-1">
-              <Card className="h-full">
-                <Collapsible open={showWebhookLogs} onOpenChange={setShowWebhookLogs}>
-                  <CollapsibleTrigger asChild>
-                    <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors pb-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center">
-                            <Activity className="w-4 h-4 text-blue-500" />
-                          </div>
-                          <div>
-                            <CardTitle className="text-lg">Logs de Webhook</CardTitle>
-                            <CardDescription>{webhookLogs.length} llamadas registradas</CardDescription>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {/* Indicador de conexión SSE */}
-                          <div className="flex items-center gap-1">
-                            <div
-                              className={`w-2 h-2 rounded-full ${
-                                sseConnectionStatus === 'connected' ? 'bg-green-500' :
-                                sseConnectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
-                                'bg-red-500'
-                              }`}
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              {sseConnectionStatus === 'connected' ? 'Conectado' :
-                               sseConnectionStatus === 'connecting' ? 'Conectando...' :
-                               'Desconectado'}
-                            </span>
-                          </div>
-                          <Badge variant="outline" className="text-xs">
-                            {webhookLogs.filter((log) => log.status === "success").length} exitosas
-                          </Badge>
-                          <ChevronDown className={`w-4 h-4 transition-transform ${showWebhookLogs ? "rotate-180" : ""}`} />
-                        </div>
-                      </div>
-                    </CardHeader>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <CardContent className="pt-0 h-[calc(100vh-320px)]">
-                      <div className="flex gap-2 mb-4">
-                        <Button onClick={testWebhook} variant="outline" size="sm">
-                          <Eye className="w-4 h-4 mr-2" />
-                          Probar Webhook
-                        </Button>
-                        <Button onClick={clearWebhookLogs} variant="outline" size="sm" disabled={webhookLogs.length === 0}>
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Limpiar Logs
-                        </Button>
-                      </div>
-
-                      {webhookLogs.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground">
-                          <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                          <p>No hay llamadas de webhook registradas</p>
-                          <p className="text-sm">Las llamadas aparecerán aquí automáticamente</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3 h-full overflow-y-auto pr-2">
-                          {webhookLogs.map((log) => (
-                            <div key={log.id} className="border rounded-lg p-3 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <Badge variant={log.status === "success" ? "default" : "destructive"} className="text-xs">
-                                    {log.method}
-                                  </Badge>
-                                  {log.body?.type && (
-                                    <Badge
-                                      variant="secondary"
-                                      className={`text-xs ${
-                                        log.body.type === "PREVIEW"
-                                          ? "bg-blue-100 text-blue-800"
-                                          : log.body.type === "CONFIRM"
-                                            ? "bg-green-100 text-green-800"
-                                            : log.body.type === "REFUND"
-                                              ? "bg-orange-100 text-orange-800"
-                                              : ""
-                                      }`}
-                                    >
-                                      {log.body.type}
-                                    </Badge>
-                                  )}
-                                  {log.body?.status && (
-                                    <Badge variant="outline" className="text-xs">
-                                      {log.body.status}
-                                    </Badge>
-                                  )}
-                                  <span className="text-sm font-mono">{new Date(log.timestamp).toLocaleString()}</span>
-                                </div>
-                                <Badge variant="outline" className={log.status === "success" ? "text-green-600" : "text-red-600"}>
-                                  {log.status}
-                                </Badge>
-                              </div>
-
-                              {log.body?.txCode && (
-                                <div className="text-sm bg-muted p-2 rounded">
-                                  <strong>TX Code:</strong> <span className="font-mono">{log.body.txCode}</span>
-                                  {log.body.externalReferentId && (
-                                    <>
-                                      <br />
-                                      <strong>External Ref:</strong>{" "}
-                                      <span className="font-mono">{log.body.externalReferentId}</span>
-                                    </>
-                                  )}
-                                </div>
-                              )}
-
-                              {log.error && (
-                                <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/20 p-2 rounded">
-                                  <strong>Error:</strong> {log.error}
-                                </div>
-                              )}
-
-                              {log.nextAction && (
-                                <div className="text-sm text-blue-600 bg-blue-50 dark:bg-blue-950/20 p-2 rounded">
-                                  <strong>Acción:</strong> {log.nextAction}
-                                </div>
-                              )}
-
-                              {log.body && (
-                                <Collapsible>
-                                  <CollapsibleTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="text-xs">
-                                      Ver Detalles Completos <ChevronDown className="w-3 h-3 ml-1" />
-                                    </Button>
-                                  </CollapsibleTrigger>
-                                  <CollapsibleContent>
-                                    <div className="text-sm mt-2">
-                                      <div className="font-medium mb-1">Body:</div>
-                                      <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
-                                        {JSON.stringify(log.body, null, 2)}
-                                      </pre>
-                                    </div>
-                                  </CollapsibleContent>
-                                </Collapsible>
-                              )}
-
-                              <Collapsible>
-                                <CollapsibleTrigger asChild>
-                                  <Button variant="ghost" size="sm" className="text-xs">
-                                    Ver Headers <ChevronDown className="w-3 h-3 ml-1" />
-                                  </Button>
-                                </CollapsibleTrigger>
-                                <CollapsibleContent>
-                                  <div className="text-sm mt-2">
-                                    <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
-                                      {JSON.stringify(log.headers, null, 2)}
-                                    </pre>
-                                  </div>
-                                </CollapsibleContent>
-                              </Collapsible>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </CollapsibleContent>
-                </Collapsible>
-              </Card>
-            </div>
+            <div className="order-2 lg:order-1">{renderWebhookLogsPanel()}</div>
 
             {/* Columna derecha - Formulario */}
             <div className="order-1 lg:order-2 flex items-start">
