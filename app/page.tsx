@@ -73,6 +73,7 @@ export default function PaymentClient() {
   const [sseConnectionStatus, setSseConnectionStatus] = useState<"connecting" | "connected" | "disconnected">(
     "disconnected",
   )
+  const [notificationStatus, setNotificationStatus] = useState<"inactive" | "connecting" | "active">("inactive")
   const { toast } = useToast()
   const [currentTxCode, setCurrentTxCode] = useState<string | null>(null) // Added to track current transaction
 
@@ -113,81 +114,93 @@ export default function PaymentClient() {
       setCurrentScreen("config")
     }
 
-    // Establecer conexión SSE para recibir webhook logs en tiempo real
-    console.log("[SSE] Establishing connection to webhook stream...")
-    setSseConnectionStatus('connecting')
+    // Inicializar sistema de notificaciones push (Long Polling)
+    console.log("[Notifications] Starting push notification system...")
+    setNotificationStatus("connecting")
 
-    const eventSource = new EventSource('/api/webhook-stream')
+    const clientId = crypto.randomUUID()
+    let lastTimestamp = '0'
+    let isActive = true
 
-    eventSource.onopen = () => {
-      console.log('[SSE] Connection established successfully')
-      setSseConnectionStatus('connected')
-    }
+    const startNotificationListener = async () => {
+      while (isActive) {
+        try {
+          console.log(`[Notifications] Checking for updates since ${lastTimestamp}`)
+          setNotificationStatus("active")
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        console.log('[SSE] Received message:', data.type)
-
-        if (data.type === 'webhook-log') {
-          const webhookLog = data.data
-          console.log('[SSE] Processing webhook log:', webhookLog.id)
-
-          // Actualizar logs inmediatamente
-          setWebhookLogs(prevLogs => {
-            const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
-            localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
-            return updatedLogs
+          const response = await fetch(`/api/notifications?clientId=${clientId}&since=${lastTimestamp}`, {
+            signal: AbortSignal.timeout(35000) // 35 second timeout
           })
 
-          // Manejar acciones del webhook si las hay
-          if (webhookLog.processedData && webhookLog.nextAction) {
-            console.log('[SSE] Executing webhook action:', webhookLog.nextAction)
-            handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`)
           }
 
-          // Mostrar notificación toast para webhooks importantes
-          if (webhookLog.body?.type) {
-            const typeMessages = {
-              'PREVIEW': 'Webhook Preview recibido',
-              'CONFIRM': 'Webhook Confirm recibido',
-              'REFUND': 'Webhook Refund recibido'
-            }
+          const data = await response.json()
 
-            toast({
-              title: "Webhook Recibido",
-              description: typeMessages[webhookLog.body.type] || "Nuevo webhook recibido",
+          if (data.notifications && data.notifications.length > 0) {
+            console.log(`[Notifications] Received ${data.notifications.length} notifications`)
+
+            data.notifications.forEach((notification: any) => {
+              if (notification.data.type === 'webhook-log') {
+                const webhookLog = notification.data.data
+
+                // Actualizar logs inmediatamente
+                setWebhookLogs(prevLogs => {
+                  const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
+                  localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+                  return updatedLogs
+                })
+
+                // Manejar acciones del webhook si las hay
+                if (webhookLog.processedData && webhookLog.nextAction) {
+                  console.log('[Notifications] Executing webhook action:', webhookLog.nextAction)
+                  handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
+                }
+
+                // Mostrar notificación toast para webhooks importantes
+                if (webhookLog.body?.type) {
+                  const typeMessages = {
+                    'PREVIEW': 'Webhook Preview recibido',
+                    'CONFIRM': 'Webhook Confirm recibido',
+                    'REFUND': 'Webhook Refund recibido'
+                  }
+
+                  toast({
+                    title: "Webhook Recibido",
+                    description: typeMessages[webhookLog.body.type] || "Nuevo webhook recibido",
+                  })
+                }
+              }
             })
           }
-        } else if (data.type === 'connection') {
-          console.log('[SSE] Connection confirmed with client ID:', data.clientId)
-          setSseConnectionStatus('connected')
-        } else if (data.type === 'ping') {
-          // Keep-alive ping, no action needed
-          console.log('[SSE] Keep-alive ping received')
+
+          // Actualizar timestamp para próxima consulta
+          if (data.timestamp) {
+            lastTimestamp = data.timestamp
+          }
+
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            console.log('[Notifications] Request timeout, retrying...')
+          } else {
+            console.error('[Notifications] Error:', error)
+            setNotificationStatus("inactive")
+            // Esperar 5 segundos antes de reintentar
+            await new Promise(resolve => setTimeout(resolve, 5000))
+          }
         }
-      } catch (error) {
-        console.error('[SSE] Error parsing message:', error)
       }
     }
 
-    eventSource.onerror = (error) => {
-      console.error('[SSE] Connection error:', error)
-      setSseConnectionStatus('disconnected')
-
-      // Auto-reconnect after 5 seconds
-      setTimeout(() => {
-        if (eventSource.readyState === EventSource.CLOSED) {
-          console.log('[SSE] Attempting to reconnect...')
-          setSseConnectionStatus('connecting')
-        }
-      }, 5000)
-    }
+    // Iniciar el listener
+    startNotificationListener()
 
     // Cleanup al desmontar el componente
     return () => {
-      console.log('[SSE] Closing connection')
-      eventSource.close()
+      console.log('[Notifications] Stopping notification system')
+      isActive = false
+      setNotificationStatus("inactive")
     }
   }, [])
 
@@ -828,10 +841,16 @@ export default function PaymentClient() {
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
                   <div
-                    className={`w-2 h-2 rounded-full ${sseConnectionStatus === "connected" ? "bg-green-500" : "bg-red-500"}`}
+                    className={`w-2 h-2 rounded-full ${
+                      notificationStatus === "active" ? "bg-green-500" :
+                      notificationStatus === "connecting" ? "bg-yellow-500 animate-pulse" :
+                      "bg-red-500"
+                    }`}
                   />
                   <span className="text-xs text-muted-foreground">
-                    {sseConnectionStatus === "connected" ? "Conectado" : "Desconectado"}
+                    {notificationStatus === "active" ? "Push Activo" :
+                     notificationStatus === "connecting" ? "Conectando..." :
+                     "Desconectado"}
                   </span>
                 </div>
                 <Badge variant="outline" className="text-xs">
