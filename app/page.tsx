@@ -72,6 +72,7 @@ export default function PaymentClient() {
   const [showWebhookLogs, setShowWebhookLogs] = useState(true) // Cambiar a true por defecto para mostrar logs inmediatamente
   const [pollingStatus, setPollingStatus] = useState<"active" | "inactive">("inactive")
   const { toast } = useToast()
+  const [currentTxCode, setCurrentTxCode] = useState<string | null>(null) // Added to track current transaction
 
   // Default user data
   const [userData, setUserData] = useState({
@@ -110,11 +111,16 @@ export default function PaymentClient() {
       setCurrentScreen("config")
     }
 
+    if (!currentTxCode) {
+      setPollingStatus("inactive")
+      return
+    }
+
     setPollingStatus("active")
     const pollWebhookLogs = async () => {
       try {
-        console.log("[v0] Polling webhook logs...")
-        const response = await fetch("/api/webhook-logs")
+        console.log("[v0] Polling webhook logs for txCode:", currentTxCode)
+        const response = await fetch(`/api/webhook-logs?txCode=${currentTxCode}`)
 
         if (!response.ok) {
           console.error("[v0] Polling failed with status:", response.status)
@@ -168,7 +174,7 @@ export default function PaymentClient() {
       clearInterval(pollInterval)
       setPollingStatus("inactive")
     }
-  }, [])
+  }, [currentTxCode]) // Added currentTxCode as dependency
 
   const saveWebhookLog = (log: WebhookLog) => {
     const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
@@ -325,6 +331,11 @@ export default function PaymentClient() {
       console.log("[v0] Preview response received:", data)
       setPaymentData(data)
 
+      if (data.txCode) {
+        setCurrentTxCode(data.txCode)
+        console.log("[v0] Starting webhook monitoring for txCode:", data.txCode)
+      }
+
       if (data.status === "PENDING_AMOUNT") {
         setStatus("waiting_amount")
         setCurrentScreen("amount-input")
@@ -424,6 +435,8 @@ export default function PaymentClient() {
     setAmount("")
     setPaymentData({})
     setStatus("idle")
+    setCurrentTxCode(null)
+    setWebhookLogs([]) // Clear logs when resetting
   }
 
   const handleWebhookAction = (processedData: any, nextAction: string) => {

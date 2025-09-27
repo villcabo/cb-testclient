@@ -12,12 +12,24 @@ let webhookLogs: Array<{
   error?: string
   processedData?: any
   nextAction?: string
+  txCode?: string // Added txCode field to track transaction
 }> = []
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    console.log("[v0] GET /api/webhook-logs - returning", webhookLogs.length, "logs")
-    return new Response(JSON.stringify({ logs: webhookLogs }), {
+    const { searchParams } = new URL(request.url)
+    const txCode = searchParams.get("txCode")
+
+    let filteredLogs = webhookLogs
+
+    if (txCode) {
+      filteredLogs = webhookLogs.filter((log) => log.txCode === txCode || log.body?.txCode === txCode)
+      console.log(`[v0] GET /api/webhook-logs - filtering by txCode: ${txCode}, found ${filteredLogs.length} logs`)
+    } else {
+      console.log("[v0] GET /api/webhook-logs - returning all", webhookLogs.length, "logs")
+    }
+
+    return new Response(JSON.stringify({ logs: filteredLogs }), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
@@ -43,6 +55,7 @@ export async function POST(request: Request) {
     const newLog = {
       id: logEntry.id || Date.now().toString(),
       timestamp: logEntry.timestamp || new Date().toISOString(),
+      txCode: logEntry.body?.txCode || logEntry.txCode,
       ...logEntry,
     }
 
