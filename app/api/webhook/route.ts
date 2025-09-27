@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
+import { broadcastWebhookLog } from "../webhook-stream/route"
 
 interface WebhookPayload {
   type: "PREVIEW" | "CONFIRM" | "REFUND"
@@ -99,6 +100,8 @@ export async function POST(request: NextRequest) {
 
     // In a real app, this would be stored in a database or sent via WebSocket/SSE
     // For now, we'll include it in the response for the frontend to handle
+
+    broadcastWebhookLog(webhookLog) // Broadcast the log via SSE
 
     return NextResponse.json({
       message: "Webhook processed successfully",

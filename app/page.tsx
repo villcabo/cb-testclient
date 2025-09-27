@@ -59,7 +59,7 @@ interface WebhookLog {
 export default function PaymentClient() {
   const [currentScreen, setCurrentScreen] = useState<
     "config" | "qr-input" | "amount-input" | "confirmation" | "success"
-  >("config")
+  >("config") // Inicializar temporalmente en config, se cambiará en useEffect
   const [apiKey, setApiKey] = useState("")
   const [apiBaseUrl, setApiBaseUrl] = useState("https://stage-api.sintesis.com.bo")
   const [token, setToken] = useState("")
@@ -69,7 +69,8 @@ export default function PaymentClient() {
   const [status, setStatus] = useState<PaymentStatus>("idle")
   const [loading, setLoading] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
-  const [showWebhookLogs, setShowWebhookLogs] = useState(false)
+  const [showWebhookLogs, setShowWebhookLogs] = useState(true) // Cambiar a true por defecto para mostrar logs inmediatamente
+  const [sseConnectionStatus, setSseConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const { toast } = useToast()
 
   // Default user data
@@ -102,22 +103,80 @@ export default function PaymentClient() {
       }
     }
 
-    const pollWebhookLogs = () => {
-      // This would typically be replaced with WebSocket or SSE
-      // For now, we'll just check localStorage periodically
-      const currentLogs = localStorage.getItem("webhook-logs")
-      if (currentLogs) {
-        try {
-          const logs = JSON.parse(currentLogs)
-          setWebhookLogs(logs)
-        } catch (error) {
-          console.error("Error parsing webhook logs:", error)
+    // Determinar pantalla inicial basada en si existen los valores requeridos
+    if (savedApiKey && savedApiBaseUrl) {
+      setCurrentScreen("qr-input")
+    } else {
+      setCurrentScreen("config")
+    }
+
+    // Conectar a SSE para recibir webhook logs en tiempo real
+    const eventSource = new EventSource('/api/webhook-stream')
+
+    eventSource.onopen = () => {
+      console.log('SSE connection established')
+      setSseConnectionStatus('connected')
+    }
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.type === 'webhook-log') {
+          const webhookLog = data.data
+
+          // Actualizar logs inmediatamente
+          setWebhookLogs(prevLogs => {
+            const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
+            localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+            return updatedLogs
+          })
+
+          // Manejar acciones del webhook si las hay
+          if (webhookLog.processedData && webhookLog.nextAction) {
+            handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
+          }
+
+          // Mostrar notificación toast
+          if (webhookLog.body?.type) {
+            const typeMessages = {
+              'PREVIEW': 'Webhook Preview recibido',
+              'CONFIRM': 'Webhook Confirm recibido',
+              'REFUND': 'Webhook Refund recibido'
+            }
+
+            console.log("Webhook received via SSE:", webhookLog)
+
+            //toast({
+            //  title: "Webhook Recibido",
+            //  description: typeMessages[webhookLog.body.type] || "Nuevo webhook recibido",
+            //})
+          }
+        } else if (data.type === 'connection') {
+          console.log('SSE connected with client ID:', data.clientId)
+          setSseConnectionStatus('connected')
         }
+      } catch (error) {
+        console.error('Error parsing SSE message:', error)
       }
     }
 
-    const interval = setInterval(pollWebhookLogs, 2000)
-    return () => clearInterval(interval)
+    eventSource.onerror = (error) => {
+      console.error('SSE error:', error)
+      setSseConnectionStatus('disconnected')
+      // Reconectar automáticamente después de un error
+      setTimeout(() => {
+        if (eventSource.readyState === EventSource.CLOSED) {
+          console.log('Attempting to reconnect SSE...')
+          setSseConnectionStatus('connecting')
+        }
+      }, 5000)
+    }
+
+    // Cleanup al desmontar el componente
+    return () => {
+      eventSource.close()
+    }
   }, [])
 
   const saveWebhookLog = (log: WebhookLog) => {
@@ -707,6 +766,21 @@ export default function PaymentClient() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {/* Indicador de conexión SSE */}
+                <div className="flex items-center gap-1">
+                  <div
+                    className={`w-2 h-2 rounded-full ${
+                      sseConnectionStatus === 'connected' ? 'bg-green-500' :
+                      sseConnectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+                      'bg-red-500'
+                    }`}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {sseConnectionStatus === 'connected' ? 'Conectado' :
+                     sseConnectionStatus === 'connecting' ? 'Conectando...' :
+                     'Desconectado'}
+                  </span>
+                </div>
                 <Badge variant="outline" className="text-xs">
                   {webhookLogs.filter((log) => log.status === "success").length} exitosas
                 </Badge>
@@ -839,20 +913,217 @@ export default function PaymentClient() {
   )
 
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="container mx-auto py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-balance">Cliente de Pruebas de Pago</h1>
-          <p className="text-muted-foreground mt-2">Herramienta para probar la API de pagos cross-border</p>
+    <div className="min-h-screen bg-background">
+      {/* Barra superior compacta */}
+      <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold">Cliente de Pruebas</h1>
+              <p className="text-xs text-muted-foreground">API de pagos cross-border</p>
+            </div>
+            {/* Indicador de conexión SSE en la barra superior */}
+            {currentScreen !== "config" && (
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-2 h-2 rounded-full ${
+                    sseConnectionStatus === 'connected' ? 'bg-green-500' :
+                    sseConnectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+                    'bg-red-500'
+                  }`}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {sseConnectionStatus === 'connected' ? 'Conectado' :
+                   sseConnectionStatus === 'connecting' ? 'Conectando...' :
+                   'Desconectado'}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
+      </div>
 
-        {currentScreen === "config" && renderConfigScreen()}
-        {currentScreen === "qr-input" && renderQRInputScreen()}
-        {currentScreen === "amount-input" && renderAmountInputScreen()}
-        {currentScreen === "confirmation" && renderConfirmationScreen()}
-        {currentScreen === "success" && renderSuccessScreen()}
+      <div className="container mx-auto p-4">
+        {currentScreen === "config" ? (
+          // Pantalla de configuración en pantalla completa
+          renderConfigScreen()
+        ) : (
+          // Layout de dos columnas para las demás pantallas
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-120px)]">
+            {/* Columna izquierda - Logs de Webhook */}
+            <div className="order-2 lg:order-1">
+              <Card className="h-full">
+                <Collapsible open={showWebhookLogs} onOpenChange={setShowWebhookLogs}>
+                  <CollapsibleTrigger asChild>
+                    <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors pb-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center">
+                            <Activity className="w-4 h-4 text-blue-500" />
+                          </div>
+                          <div>
+                            <CardTitle className="text-lg">Logs de Webhook</CardTitle>
+                            <CardDescription>{webhookLogs.length} llamadas registradas</CardDescription>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {/* Indicador de conexión SSE */}
+                          <div className="flex items-center gap-1">
+                            <div
+                              className={`w-2 h-2 rounded-full ${
+                                sseConnectionStatus === 'connected' ? 'bg-green-500' :
+                                sseConnectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+                                'bg-red-500'
+                              }`}
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              {sseConnectionStatus === 'connected' ? 'Conectado' :
+                               sseConnectionStatus === 'connecting' ? 'Conectando...' :
+                               'Desconectado'}
+                            </span>
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            {webhookLogs.filter((log) => log.status === "success").length} exitosas
+                          </Badge>
+                          <ChevronDown className={`w-4 h-4 transition-transform ${showWebhookLogs ? "rotate-180" : ""}`} />
+                        </div>
+                      </div>
+                    </CardHeader>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent className="pt-0 h-[calc(100vh-320px)]">
+                      <div className="flex gap-2 mb-4">
+                        <Button onClick={testWebhook} variant="outline" size="sm">
+                          <Eye className="w-4 h-4 mr-2" />
+                          Probar Webhook
+                        </Button>
+                        <Button onClick={clearWebhookLogs} variant="outline" size="sm" disabled={webhookLogs.length === 0}>
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Limpiar Logs
+                        </Button>
+                      </div>
 
-        {currentScreen !== "config" && renderWebhookLogsPanel()}
+                      {webhookLogs.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                          <p>No hay llamadas de webhook registradas</p>
+                          <p className="text-sm">Las llamadas aparecerán aquí automáticamente</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 h-full overflow-y-auto pr-2">
+                          {webhookLogs.map((log) => (
+                            <div key={log.id} className="border rounded-lg p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={log.status === "success" ? "default" : "destructive"} className="text-xs">
+                                    {log.method}
+                                  </Badge>
+                                  {log.body?.type && (
+                                    <Badge
+                                      variant="secondary"
+                                      className={`text-xs ${
+                                        log.body.type === "PREVIEW"
+                                          ? "bg-blue-100 text-blue-800"
+                                          : log.body.type === "CONFIRM"
+                                            ? "bg-green-100 text-green-800"
+                                            : log.body.type === "REFUND"
+                                              ? "bg-orange-100 text-orange-800"
+                                              : ""
+                                      }`}
+                                    >
+                                      {log.body.type}
+                                    </Badge>
+                                  )}
+                                  {log.body?.status && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {log.body.status}
+                                    </Badge>
+                                  )}
+                                  <span className="text-sm font-mono">{new Date(log.timestamp).toLocaleString()}</span>
+                                </div>
+                                <Badge variant="outline" className={log.status === "success" ? "text-green-600" : "text-red-600"}>
+                                  {log.status}
+                                </Badge>
+                              </div>
+
+                              {log.body?.txCode && (
+                                <div className="text-sm bg-muted p-2 rounded">
+                                  <strong>TX Code:</strong> <span className="font-mono">{log.body.txCode}</span>
+                                  {log.body.externalReferentId && (
+                                    <>
+                                      <br />
+                                      <strong>External Ref:</strong>{" "}
+                                      <span className="font-mono">{log.body.externalReferentId}</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+
+                              {log.error && (
+                                <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/20 p-2 rounded">
+                                  <strong>Error:</strong> {log.error}
+                                </div>
+                              )}
+
+                              {log.nextAction && (
+                                <div className="text-sm text-blue-600 bg-blue-50 dark:bg-blue-950/20 p-2 rounded">
+                                  <strong>Acción:</strong> {log.nextAction}
+                                </div>
+                              )}
+
+                              {log.body && (
+                                <Collapsible>
+                                  <CollapsibleTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="text-xs">
+                                      Ver Detalles Completos <ChevronDown className="w-3 h-3 ml-1" />
+                                    </Button>
+                                  </CollapsibleTrigger>
+                                  <CollapsibleContent>
+                                    <div className="text-sm mt-2">
+                                      <div className="font-medium mb-1">Body:</div>
+                                      <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                        {JSON.stringify(log.body, null, 2)}
+                                      </pre>
+                                    </div>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              )}
+
+                              <Collapsible>
+                                <CollapsibleTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="text-xs">
+                                    Ver Headers <ChevronDown className="w-3 h-3 ml-1" />
+                                  </Button>
+                                </CollapsibleTrigger>
+                                <CollapsibleContent>
+                                  <div className="text-sm mt-2">
+                                    <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                      {JSON.stringify(log.headers, null, 2)}
+                                    </pre>
+                                  </div>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </CollapsibleContent>
+                </Collapsible>
+              </Card>
+            </div>
+
+            {/* Columna derecha - Formulario */}
+            <div className="order-1 lg:order-2 flex items-start">
+              <div className="w-full">
+                {currentScreen === "qr-input" && renderQRInputScreen()}
+                {currentScreen === "amount-input" && renderAmountInputScreen()}
+                {currentScreen === "confirmation" && renderConfirmationScreen()}
+                {currentScreen === "success" && renderSuccessScreen()}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

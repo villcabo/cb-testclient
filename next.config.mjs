@@ -13,6 +13,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Suprimir warnings de hydratación causados por extensiones del navegador
+  reactStrictMode: true,
 }
 
 export default nextConfig
