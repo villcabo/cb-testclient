@@ -113,34 +113,51 @@ export default function PaymentClient() {
     setPollingStatus("active")
     const pollWebhookLogs = async () => {
       try {
+        console.log("[v0] Polling webhook logs...")
         const response = await fetch("/api/webhook-logs")
-        if (response.ok) {
-          const data = await response.json()
-          if (data.logs && data.logs.length > 0) {
-            setWebhookLogs((prevLogs) => {
-              const newLogs = data.logs.filter(
-                (newLog: WebhookLog) => !prevLogs.some((existingLog) => existingLog.id === newLog.id),
-              )
 
-              if (newLogs.length > 0) {
-                const updatedLogs = [...newLogs, ...prevLogs].slice(0, 50)
-                localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+        if (!response.ok) {
+          console.error("[v0] Polling failed with status:", response.status)
+          return
+        }
 
-                // Handle webhook actions for new logs
-                newLogs.forEach((log: WebhookLog) => {
-                  if (log.processedData && log.nextAction) {
-                    handleWebhookAction(log.processedData, log.nextAction)
-                  }
-                })
+        const contentType = response.headers.get("content-type")
+        if (!contentType || !contentType.includes("application/json")) {
+          console.error("[v0] Response is not JSON, content-type:", contentType)
+          const text = await response.text()
+          console.error("[v0] Response text:", text.substring(0, 200))
+          return
+        }
 
-                return updatedLogs
-              }
-              return prevLogs
-            })
-          }
+        const data = await response.json()
+        console.log("[v0] Polling successful, received", data.logs?.length || 0, "logs")
+
+        if (data.logs && data.logs.length > 0) {
+          setWebhookLogs((prevLogs) => {
+            const newLogs = data.logs.filter(
+              (newLog: WebhookLog) => !prevLogs.some((existingLog) => existingLog.id === newLog.id),
+            )
+
+            if (newLogs.length > 0) {
+              console.log("[v0] Found", newLogs.length, "new logs")
+              const updatedLogs = [...newLogs, ...prevLogs].slice(0, 50)
+              localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+
+              // Handle webhook actions for new logs
+              newLogs.forEach((log: WebhookLog) => {
+                if (log.processedData && log.nextAction) {
+                  console.log("[v0] Handling webhook action:", log.nextAction)
+                  handleWebhookAction(log.processedData, log.nextAction)
+                }
+              })
+
+              return updatedLogs
+            }
+            return prevLogs
+          })
         }
       } catch (error) {
-        console.error("Error polling webhook logs:", error)
+        console.error("[v0] Error polling webhook logs:", error)
       }
     }
 

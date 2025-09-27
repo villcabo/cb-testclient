@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
-import { broadcastWebhookLog } from "../webhook-stream/route"
 
 interface WebhookPayload {
   type: "PREVIEW" | "CONFIRM" | "REFUND"
@@ -24,6 +23,20 @@ interface WebhookPayload {
   paymentDate?: string
   amount?: number
   currency?: string
+}
+
+async function sendLogToEndpoint(logData: any) {
+  try {
+    await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/webhook-logs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(logData),
+    })
+  } catch (error) {
+    console.error("Failed to send log to endpoint:", error)
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -93,15 +106,13 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: headers,
       body: body,
-      status: "success",
+      type: body.type,
+      status: body.status,
       processedData,
       nextAction,
     }
 
-    // In a real app, this would be stored in a database or sent via WebSocket/SSE
-    // For now, we'll include it in the response for the frontend to handle
-
-    broadcastWebhookLog(webhookLog) // Broadcast the log via SSE
+    await sendLogToEndpoint(webhookLog)
 
     return NextResponse.json({
       message: "Webhook processed successfully",
@@ -123,6 +134,8 @@ export async function POST(request: NextRequest) {
       status: "error",
     }
 
+    await sendLogToEndpoint(errorLog)
+
     return NextResponse.json(
       {
         error: "Failed to process webhook",
@@ -142,6 +155,8 @@ export async function GET(request: NextRequest) {
     body: null,
     status: "success",
   }
+
+  await sendLogToEndpoint(webhookLog)
 
   return NextResponse.json({
     message: "Webhook endpoint is active",
