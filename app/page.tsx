@@ -58,7 +58,7 @@ interface WebhookLog {
 
 export default function PaymentClient() {
   const [currentScreen, setCurrentScreen] = useState<
-    "config" | "qr-input" | "amount-input" | "confirmation" | "success"
+    "config" | "qr-input" | "amount-input" | "confirmation" | "processing" | "success"
   >("config") // Inicializar temporalmente en config, se cambiará en useEffect
   const [apiKey, setApiKey] = useState("")
   const [apiBaseUrl, setApiBaseUrl] = useState("https://stage-api.sintesis.com.bo")
@@ -414,8 +414,7 @@ export default function PaymentClient() {
 
       const data = await response.json()
       if (data.status === "PROCESSING") {
-        setStatus("completed")
-        setCurrentScreen("success")
+        setCurrentScreen("processing") // Wait for COMPLETED webhook
       }
     } catch (error) {
       setStatus("error")
@@ -733,6 +732,38 @@ export default function PaymentClient() {
     </div>
   )
 
+  const renderProcessingScreen = () => (
+    <div className="max-w-md mx-auto space-y-6">
+      <Card>
+        <CardHeader className="text-center">
+          <div className="mx-auto w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center mb-4">
+            <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+          </div>
+          <CardTitle>Procesando Pago</CardTitle>
+          <CardDescription>Esperando confirmación del procesamiento...</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg text-center">
+            <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+              PROCESSING
+            </Badge>
+            <div className="mt-2 text-sm text-muted-foreground">Código: {paymentData.txCode}</div>
+            <div className="mt-2 text-sm text-muted-foreground">El pago está siendo procesado. Por favor espera...</div>
+          </div>
+
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+            <span>Monitoreando webhooks automáticamente</span>
+          </div>
+
+          <Button onClick={resetFlow} variant="outline" className="w-full bg-transparent">
+            Cancelar y Volver
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
   const renderSuccessScreen = () => (
     <div className="max-w-md mx-auto space-y-6">
       <Card>
@@ -740,17 +771,19 @@ export default function PaymentClient() {
           <div className="mx-auto w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center mb-4">
             <CheckCircle className="w-6 h-6 text-green-500" />
           </div>
-          <CardTitle>Pago Procesado</CardTitle>
-          <CardDescription>El pago se ha procesado correctamente</CardDescription>
+          <CardTitle>Pago Completado</CardTitle>
+          <CardDescription>El pago se ha procesado exitosamente</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg text-center">
             <Badge variant="secondary" className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-              PROCESSING
+              COMPLETED
             </Badge>
             <div className="mt-2 text-sm text-muted-foreground">Código: {paymentData.txCode}</div>
             {paymentData.completedDate && (
-              <div className="mt-2 text-sm text-muted-foreground">Fecha de Completado: {paymentData.completedDate}</div>
+              <div className="mt-2 text-sm text-muted-foreground">
+                Completado: {new Date(paymentData.completedDate).toLocaleString()}
+              </div>
             )}
           </div>
 
@@ -927,14 +960,6 @@ export default function PaymentClient() {
               <h1 className="text-lg font-semibold">Cliente de Pruebas</h1>
               <p className="text-xs text-muted-foreground">API de pagos cross-border</p>
             </div>
-            {currentScreen !== "config" && (
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${pollingStatus === "active" ? "bg-green-500" : "bg-red-500"}`} />
-                <span className="text-xs text-muted-foreground">
-                  {pollingStatus === "active" ? "Monitoreando" : "Inactivo"}
-                </span>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -955,6 +980,7 @@ export default function PaymentClient() {
                 {currentScreen === "qr-input" && renderQRInputScreen()}
                 {currentScreen === "amount-input" && renderAmountInputScreen()}
                 {currentScreen === "confirmation" && renderConfirmationScreen()}
+                {currentScreen === "processing" && renderProcessingScreen()}
                 {currentScreen === "success" && renderSuccessScreen()}
               </div>
             </div>
