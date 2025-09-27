@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
+import { broadcastWebhookLog } from "../webhook-stream/route"
 
 interface WebhookPayload {
   type: "PREVIEW" | "CONFIRM" | "REFUND"
@@ -25,26 +26,12 @@ interface WebhookPayload {
   currency?: string
 }
 
-async function sendLogToEndpoint(logData: any) {
-  try {
-    await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/webhook-logs`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(logData),
-    })
-  } catch (error) {
-    console.error("Failed to send log to endpoint:", error)
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body: WebhookPayload = await request.json()
     const headers = Object.fromEntries(request.headers.entries())
 
-    console.log("Webhook received:", JSON.stringify(body, null, 2))
+    console.log("[Webhook] Received webhook:", JSON.stringify(body, null, 2))
 
     let processedData = null
     let nextAction = null
@@ -106,23 +93,25 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: headers,
       body: body,
-      type: body.type,
-      status: body.status,
+      status: "success",
       processedData,
       nextAction,
     }
 
-    await sendLogToEndpoint(webhookLog)
+    console.log("[Webhook] Created webhook log with ID:", webhookLog.id)
+
+    // Broadcast via SSE instead of storing in memory/database
+    broadcastWebhookLog(webhookLog)
 
     return NextResponse.json({
       message: "Webhook processed successfully",
       received: body,
-      logData: webhookLog,
+      logId: webhookLog.id,
       processedData,
       nextAction,
     })
   } catch (error) {
-    console.error("Webhook error:", error)
+    console.error("[Webhook] Error processing webhook:", error)
 
     const errorLog = {
       id: crypto.randomUUID(),
@@ -134,12 +123,13 @@ export async function POST(request: NextRequest) {
       status: "error",
     }
 
-    await sendLogToEndpoint(errorLog)
+    // Broadcast error via SSE
+    broadcastWebhookLog(errorLog)
 
     return NextResponse.json(
       {
         error: "Failed to process webhook",
-        logData: errorLog,
+        logId: errorLog.id,
       },
       { status: 500 },
     )
@@ -156,10 +146,13 @@ export async function GET(request: NextRequest) {
     status: "success",
   }
 
-  await sendLogToEndpoint(webhookLog)
+  console.log("[Webhook] Test webhook called with ID:", webhookLog.id)
+
+  // Broadcast test webhook via SSE
+  broadcastWebhookLog(webhookLog)
 
   return NextResponse.json({
     message: "Webhook endpoint is active",
-    logData: webhookLog,
+    logId: webhookLog.id,
   })
 }

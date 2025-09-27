@@ -70,7 +70,9 @@ export default function PaymentClient() {
   const [loading, setLoading] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
   const [showWebhookLogs, setShowWebhookLogs] = useState(true) // Cambiar a true por defecto para mostrar logs inmediatamente
-  const [pollingStatus, setPollingStatus] = useState<"active" | "inactive">("inactive")
+  const [sseConnectionStatus, setSseConnectionStatus] = useState<"connecting" | "connected" | "disconnected">(
+    "disconnected",
+  )
   const { toast } = useToast()
   const [currentTxCode, setCurrentTxCode] = useState<string | null>(null) // Added to track current transaction
 
@@ -111,70 +113,83 @@ export default function PaymentClient() {
       setCurrentScreen("config")
     }
 
-    if (!currentTxCode) {
-      setPollingStatus("inactive")
-      return
+    // Establecer conexión SSE para recibir webhook logs en tiempo real
+    console.log("[SSE] Establishing connection to webhook stream...")
+    setSseConnectionStatus('connecting')
+
+    const eventSource = new EventSource('/api/webhook-stream')
+
+    eventSource.onopen = () => {
+      console.log('[SSE] Connection established successfully')
+      setSseConnectionStatus('connected')
     }
 
-    setPollingStatus("active")
-    const pollWebhookLogs = async () => {
+    eventSource.onmessage = (event) => {
       try {
-        console.log("[v0] Polling webhook logs for txCode:", currentTxCode)
-        const response = await fetch(`/api/webhook-logs?txCode=${currentTxCode}`)
+        const data = JSON.parse(event.data)
+        console.log('[SSE] Received message:', data.type)
 
-        if (!response.ok) {
-          console.error("[v0] Polling failed with status:", response.status)
-          return
-        }
+        if (data.type === 'webhook-log') {
+          const webhookLog = data.data
+          console.log('[SSE] Processing webhook log:', webhookLog.id)
 
-        const contentType = response.headers.get("content-type")
-        if (!contentType || !contentType.includes("application/json")) {
-          console.error("[v0] Response is not JSON, content-type:", contentType)
-          const text = await response.text()
-          console.error("[v0] Response text:", text.substring(0, 200))
-          return
-        }
-
-        const data = await response.json()
-        console.log("[v0] Polling successful, received", data.logs?.length || 0, "logs")
-
-        if (data.logs && data.logs.length > 0) {
-          setWebhookLogs((prevLogs) => {
-            const newLogs = data.logs.filter(
-              (newLog: WebhookLog) => !prevLogs.some((existingLog) => existingLog.id === newLog.id),
-            )
-
-            if (newLogs.length > 0) {
-              console.log("[v0] Found", newLogs.length, "new logs")
-              const updatedLogs = [...newLogs, ...prevLogs].slice(0, 50)
-              localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
-
-              // Handle webhook actions for new logs
-              newLogs.forEach((log: WebhookLog) => {
-                if (log.processedData && log.nextAction) {
-                  console.log("[v0] Handling webhook action:", log.nextAction)
-                  handleWebhookAction(log.processedData, log.nextAction)
-                }
-              })
-
-              return updatedLogs
-            }
-            return prevLogs
+          // Actualizar logs inmediatamente
+          setWebhookLogs(prevLogs => {
+            const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
+            localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+            return updatedLogs
           })
+
+          // Manejar acciones del webhook si las hay
+          if (webhookLog.processedData && webhookLog.nextAction) {
+            console.log('[SSE] Executing webhook action:', webhookLog.nextAction)
+            handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
+          }
+
+          // Mostrar notificación toast para webhooks importantes
+          if (webhookLog.body?.type) {
+            const typeMessages = {
+              'PREVIEW': 'Webhook Preview recibido',
+              'CONFIRM': 'Webhook Confirm recibido',
+              'REFUND': 'Webhook Refund recibido'
+            }
+
+            toast({
+              title: "Webhook Recibido",
+              description: typeMessages[webhookLog.body.type] || "Nuevo webhook recibido",
+            })
+          }
+        } else if (data.type === 'connection') {
+          console.log('[SSE] Connection confirmed with client ID:', data.clientId)
+          setSseConnectionStatus('connected')
+        } else if (data.type === 'ping') {
+          // Keep-alive ping, no action needed
+          console.log('[SSE] Keep-alive ping received')
         }
       } catch (error) {
-        console.error("[v0] Error polling webhook logs:", error)
+        console.error('[SSE] Error parsing message:', error)
       }
     }
 
-    // Poll every 2 seconds
-    const pollInterval = setInterval(pollWebhookLogs, 2000)
+    eventSource.onerror = (error) => {
+      console.error('[SSE] Connection error:', error)
+      setSseConnectionStatus('disconnected')
 
-    return () => {
-      clearInterval(pollInterval)
-      setPollingStatus("inactive")
+      // Auto-reconnect after 5 seconds
+      setTimeout(() => {
+        if (eventSource.readyState === EventSource.CLOSED) {
+          console.log('[SSE] Attempting to reconnect...')
+          setSseConnectionStatus('connecting')
+        }
+      }, 5000)
     }
-  }, [currentTxCode]) // Added currentTxCode as dependency
+
+    // Cleanup al desmontar el componente
+    return () => {
+      console.log('[SSE] Closing connection')
+      eventSource.close()
+    }
+  }, [])
 
   const saveWebhookLog = (log: WebhookLog) => {
     const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
@@ -190,7 +205,7 @@ export default function PaymentClient() {
     setWebhookLogs([])
     localStorage.removeItem("webhook-logs")
 
-    // Also clear server-side logs
+    // También limpiar logs del lado del servidor
     try {
       await fetch("/api/webhook-logs", { method: "DELETE" })
     } catch (error) {
@@ -813,10 +828,10 @@ export default function PaymentClient() {
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
                   <div
-                    className={`w-2 h-2 rounded-full ${pollingStatus === "active" ? "bg-green-500" : "bg-red-500"}`}
+                    className={`w-2 h-2 rounded-full ${sseConnectionStatus === "connected" ? "bg-green-500" : "bg-red-500"}`}
                   />
                   <span className="text-xs text-muted-foreground">
-                    {pollingStatus === "active" ? "Monitoreando" : "Inactivo"}
+                    {sseConnectionStatus === "connected" ? "Conectado" : "Desconectado"}
                   </span>
                 </div>
                 <Badge variant="outline" className="text-xs">
