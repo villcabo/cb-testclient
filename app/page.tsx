@@ -58,7 +58,7 @@ interface WebhookLog {
 
 export default function PaymentClient() {
   const [currentScreen, setCurrentScreen] = useState<
-    "config" | "qr-input" | "amount-input" | "confirmation" | "processing" | "success"
+    "config" | "qr-input" | "waiting-webhook" | "amount-input" | "confirmation" | "processing" | "success"
   >("config") // Inicializar temporalmente en config, se cambiará en useEffect
   const [apiKey, setApiKey] = useState("")
   const [apiBaseUrl, setApiBaseUrl] = useState("https://stage-api.sintesis.com.bo")
@@ -119,7 +119,7 @@ export default function PaymentClient() {
     setNotificationStatus("connecting")
 
     const clientId = crypto.randomUUID()
-    let lastTimestamp = '0'
+    let lastTimestamp = "0"
     let isActive = true
 
     const startNotificationListener = async () => {
@@ -129,7 +129,7 @@ export default function PaymentClient() {
           setNotificationStatus("active")
 
           const response = await fetch(`/api/notifications?clientId=${clientId}&since=${lastTimestamp}`, {
-            signal: AbortSignal.timeout(35000) // 35 second timeout
+            signal: AbortSignal.timeout(35000), // 35 second timeout
           })
 
           if (!response.ok) {
@@ -142,11 +142,13 @@ export default function PaymentClient() {
             console.log(`[Notifications] Received ${data.notifications.length} notifications`)
 
             data.notifications.forEach((notification: any) => {
-              if (notification.data.type === 'webhook-log') {
+              if (notification.data.type === "webhook-log") {
                 const webhookLog = notification.data.data
 
+                console.log("[Frontend] Webhook received:", JSON.stringify(webhookLog, null, 2))
+
                 // Actualizar logs inmediatamente
-                setWebhookLogs(prevLogs => {
+                setWebhookLogs((prevLogs) => {
                   const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
                   localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
                   return updatedLogs
@@ -154,16 +156,16 @@ export default function PaymentClient() {
 
                 // Manejar acciones del webhook si las hay
                 if (webhookLog.processedData && webhookLog.nextAction) {
-                  console.log('[Notifications] Executing webhook action:', webhookLog.nextAction)
+                  console.log("[Frontend] Executing webhook action:", webhookLog.nextAction)
                   handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
                 }
 
                 // Mostrar notificación toast para webhooks importantes
                 if (webhookLog.body?.type) {
                   const typeMessages = {
-                    'PREVIEW': 'Webhook Preview recibido',
-                    'CONFIRM': 'Webhook Confirm recibido',
-                    'REFUND': 'Webhook Refund recibido'
+                    PREVIEW: "Webhook Preview recibido",
+                    CONFIRM: "Webhook Confirm recibido",
+                    REFUND: "Webhook Refund recibido",
                   }
 
                   toast({
@@ -179,15 +181,14 @@ export default function PaymentClient() {
           if (data.timestamp) {
             lastTimestamp = data.timestamp
           }
-
         } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            console.log('[Notifications] Request timeout, retrying...')
+          if (error instanceof Error && error.name === "AbortError") {
+            console.log("[Notifications] Request timeout, retrying...")
           } else {
-            console.error('[Notifications] Error:', error)
+            console.error("[Notifications] Error:", error)
             setNotificationStatus("inactive")
             // Esperar 5 segundos antes de reintentar
-            await new Promise(resolve => setTimeout(resolve, 5000))
+            await new Promise((resolve) => setTimeout(resolve, 5000))
           }
         }
       }
@@ -198,7 +199,7 @@ export default function PaymentClient() {
 
     // Cleanup al desmontar el componente
     return () => {
-      console.log('[Notifications] Stopping notification system')
+      console.log("[Notifications] Stopping notification system")
       isActive = false
       setNotificationStatus("inactive")
     }
@@ -357,19 +358,19 @@ export default function PaymentClient() {
 
       const data = await response.json()
       console.log("[v0] Preview response received:", data)
-      setPaymentData(data)
 
       if (data.txCode) {
         setCurrentTxCode(data.txCode)
-        console.log("[v0] Starting webhook monitoring for txCode:", data.txCode)
-      }
+        setPaymentData({ txCode: data.txCode })
+        console.log("[v0] TxCode received:", data.txCode, "- Waiting for webhook...")
 
-      if (data.status === "PENDING_AMOUNT") {
-        setStatus("waiting_amount")
-        setCurrentScreen("amount-input")
-      } else if (data.status === "CLOSED_AMOUNT") {
-        setStatus("ready_to_confirm")
-        setCurrentScreen("confirmation")
+        // Show waiting screen instead of immediately showing amount or confirmation
+        setCurrentScreen("waiting-webhook")
+
+        toast({
+          title: "Procesando QR",
+          description: "Esperando respuesta del webhook...",
+        })
       }
     } catch (error) {
       console.error("[v0] Preview error:", error)
@@ -467,6 +468,8 @@ export default function PaymentClient() {
   }
 
   const handleWebhookAction = (processedData: any, nextAction: string) => {
+    console.log("[Frontend] handleWebhookAction called:", { processedData, nextAction })
+
     switch (nextAction) {
       case "show_confirmation":
         setPaymentData({
@@ -842,15 +845,19 @@ export default function PaymentClient() {
                 <div className="flex items-center gap-1">
                   <div
                     className={`w-2 h-2 rounded-full ${
-                      notificationStatus === "active" ? "bg-green-500" :
-                      notificationStatus === "connecting" ? "bg-yellow-500 animate-pulse" :
-                      "bg-red-500"
+                      notificationStatus === "active"
+                        ? "bg-green-500"
+                        : notificationStatus === "connecting"
+                          ? "bg-yellow-500 animate-pulse"
+                          : "bg-red-500"
                     }`}
                   />
                   <span className="text-xs text-muted-foreground">
-                    {notificationStatus === "active" ? "Push Activo" :
-                     notificationStatus === "connecting" ? "Conectando..." :
-                     "Desconectado"}
+                    {notificationStatus === "active"
+                      ? "Push Activo"
+                      : notificationStatus === "connecting"
+                        ? "Conectando..."
+                        : "Desconectado"}
                   </span>
                 </div>
                 <Badge variant="outline" className="text-xs">
@@ -984,6 +991,40 @@ export default function PaymentClient() {
     </Card>
   )
 
+  const renderWaitingWebhookScreen = () => (
+    <div className="max-w-md mx-auto space-y-6">
+      <Card>
+        <CardHeader className="text-center">
+          <div className="mx-auto w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center mb-4">
+            <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+          </div>
+          <CardTitle>Esperando Webhook</CardTitle>
+          <CardDescription>Procesando QR y esperando respuesta del servidor...</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg text-center">
+            <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+              ESPERANDO
+            </Badge>
+            <div className="mt-2 text-sm text-muted-foreground">Código: {paymentData.txCode}</div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              El servidor está procesando el QR. La pantalla se actualizará automáticamente cuando llegue el webhook.
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+            <span>Monitoreando webhooks automáticamente</span>
+          </div>
+
+          <Button onClick={resetFlow} variant="outline" className="w-full bg-transparent">
+            Cancelar y Volver
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
   return (
     <div className="min-h-screen bg-background">
       {/* Barra superior compacta */}
@@ -1012,6 +1053,7 @@ export default function PaymentClient() {
             <div className="order-1 lg:order-2 flex items-start">
               <div className="w-full">
                 {currentScreen === "qr-input" && renderQRInputScreen()}
+                {currentScreen === "waiting-webhook" && renderWaitingWebhookScreen()}
                 {currentScreen === "amount-input" && renderAmountInputScreen()}
                 {currentScreen === "confirmation" && renderConfirmationScreen()}
                 {currentScreen === "processing" && renderProcessingScreen()}

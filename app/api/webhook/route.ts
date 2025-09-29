@@ -10,13 +10,13 @@ async function sendNotification(webhookLog: any) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        type: 'webhook-log',
+        type: "webhook-log",
         data: webhookLog,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       }),
     })
   } catch (error) {
-    console.error('[Webhook] Failed to send notification:', error)
+    console.error("[Webhook] Failed to send notification:", error)
   }
 }
 
@@ -31,7 +31,7 @@ async function storeWebhookLog(webhookLog: any) {
       body: JSON.stringify(webhookLog),
     })
   } catch (error) {
-    console.error('[Webhook] Failed to store log:', error)
+    console.error("[Webhook] Failed to store log:", error)
   }
 }
 
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     const body: WebhookPayload = await request.json()
     const headers = Object.fromEntries(request.headers.entries())
 
-    console.log("[Webhook] Received webhook:", JSON.stringify(body, null, 2))
+    console.log("[Backend] Webhook received and sending to frontend:", JSON.stringify(body, null, 2))
 
     let processedData = null
     let nextAction = null
@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
             collector: body.collector,
           }
           nextAction = "show_confirmation"
+          console.log("[Backend] PREVIEW with READY_TO_CONFIRM - Action: show_confirmation")
         } else if (body.status === "WAITING_AMOUNT") {
           // QR con monto abierto - mostrar pantalla de ingreso de monto
           processedData = {
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest) {
             txCode: body.txCode,
           }
           nextAction = "show_amount_input"
+          console.log("[Backend] PREVIEW with WAITING_AMOUNT - Action: show_amount_input")
         }
         break
 
@@ -99,6 +101,7 @@ export async function POST(request: NextRequest) {
             completedDate: body.completedDate,
           }
           nextAction = "show_success"
+          console.log("[Backend] CONFIRM with COMPLETED - Action: show_success")
         }
         break
 
@@ -116,6 +119,7 @@ export async function POST(request: NextRequest) {
             paymentDate: body.paymentDate,
           }
           nextAction = "show_refund_notification"
+          console.log("[Backend] REFUND - Action: show_refund_notification")
         }
         break
     }
@@ -131,13 +135,12 @@ export async function POST(request: NextRequest) {
       nextAction,
     }
 
-    console.log("[Webhook] Created webhook log with ID:", webhookLog.id)
+    console.log("[Backend] Created webhook log with ID:", webhookLog.id, "- Sending notification...")
 
     // Send notification and store log in parallel
-    await Promise.all([
-      sendNotification(webhookLog),
-      storeWebhookLog(webhookLog)
-    ])
+    await Promise.all([sendNotification(webhookLog), storeWebhookLog(webhookLog)])
+
+    console.log("[Backend] Notification sent successfully for log ID:", webhookLog.id)
 
     return NextResponse.json({
       message: "Webhook processed successfully",
@@ -147,7 +150,7 @@ export async function POST(request: NextRequest) {
       nextAction,
     })
   } catch (error) {
-    console.error("[Webhook] Error processing webhook:", error)
+    console.error("[Backend] Error processing webhook:", error)
 
     const errorLog = {
       id: crypto.randomUUID(),
@@ -160,10 +163,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Send error notification and store log in parallel
-    await Promise.all([
-      sendNotification(errorLog),
-      storeWebhookLog(errorLog)
-    ])
+    await Promise.all([sendNotification(errorLog), storeWebhookLog(errorLog)])
 
     return NextResponse.json(
       {
@@ -188,10 +188,7 @@ export async function GET(request: NextRequest) {
   console.log("[Webhook] Test webhook called with ID:", webhookLog.id)
 
   // Send test notification and store log in parallel
-  await Promise.all([
-    sendNotification(webhookLog),
-    storeWebhookLog(webhookLog)
-  ])
+  await Promise.all([sendNotification(webhookLog), storeWebhookLog(webhookLog)])
 
   return NextResponse.json({
     message: "Webhook endpoint is active",
