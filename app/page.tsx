@@ -56,6 +56,43 @@ interface WebhookLog {
   nextAction?: string
 }
 
+// Función para generar y obtener ID único del cliente basado en el navegador
+function getClientId(): string {
+  if (typeof window === 'undefined') return 'server-side'
+
+  let clientId = localStorage.getItem('client-id')
+
+  if (!clientId) {
+    // Generar ID único basado en información del navegador
+    const browserInfo = {
+      userAgent: navigator.userAgent,
+      language: navigator.language,
+      platform: navigator.platform,
+      cookieEnabled: navigator.cookieEnabled,
+      onLine: navigator.onLine,
+      hardwareConcurrency: navigator.hardwareConcurrency,
+      deviceMemory: (navigator as any).deviceMemory || 0,
+      timestamp: Date.now(),
+      random: Math.random().toString(36).substring(2, 15)
+    }
+
+    // Crear hash simple del fingerprint del navegador
+    const fingerprint = JSON.stringify(browserInfo)
+    let hash = 0
+    for (let i = 0; i < fingerprint.length; i++) {
+      const char = fingerprint.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32bit integer
+    }
+
+    clientId = `client_${Math.abs(hash).toString(36)}_${Date.now().toString(36)}`
+    localStorage.setItem('client-id', clientId)
+    console.log('[Client] Generated new client ID:', clientId)
+  }
+
+  return clientId
+}
+
 export default function PaymentClient() {
   const [currentScreen, setCurrentScreen] = useState<
     "config" | "qr-input" | "waiting-webhook" | "amount-input" | "confirmation" | "processing" | "success"
@@ -74,6 +111,7 @@ export default function PaymentClient() {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const { toast } = useToast()
   const [currentTxCode, setCurrentTxCode] = useState<string | null>(null) // Added to track current transaction
+  const [clientId, setClientId] = useState<string>('')
 
   // Default user data
   const [userData, setUserData] = useState({
@@ -87,9 +125,14 @@ export default function PaymentClient() {
   })
 
   useEffect(() => {
+    // Inicializar clientId al cargar la página
+    const id = getClientId()
+    setClientId(id)
+    console.log('[Client] Using client ID:', id)
+
     const savedApiKey = localStorage.getItem("payment-api-key")
     const savedApiBaseUrl = localStorage.getItem("payment-api-base-url")
-    const savedWebhookLogs = localStorage.getItem("webhook-logs")
+    const savedWebhookLogs = localStorage.getItem(`webhook-logs-${id}`) // Usar clientId específico
 
     if (savedApiKey) {
       setApiKey(savedApiKey)
@@ -114,15 +157,15 @@ export default function PaymentClient() {
   }, [])
 
   useEffect(() => {
-    if (!currentTxCode || !isPolling) {
+    if (!currentTxCode || !isPolling || !clientId) {
       return
     }
 
-    console.log(`[Polling] Starting polling for txCode: ${currentTxCode}`)
+    console.log(`[Polling] Starting polling for client: ${clientId}, txCode: ${currentTxCode}`)
 
     const pollWebhooks = async () => {
       try {
-        const response = await fetch(`/api/webhook-logs?txCode=${currentTxCode}`)
+        const response = await fetch(`/api/webhook-logs?clientId=${clientId}&txCode=${currentTxCode}`)
 
         if (!response.ok) {
           console.error(`[Polling] Error: HTTP ${response.status}`)
@@ -132,11 +175,11 @@ export default function PaymentClient() {
         const data = await response.json()
 
         if (data.logs && data.logs.length > 0) {
-          console.log(`[Polling] Received ${data.logs.length} webhook logs`)
+          console.log(`[Polling] Received ${data.logs.length} webhook logs for client: ${clientId}`)
 
           // Update logs
           setWebhookLogs(data.logs)
-          localStorage.setItem("webhook-logs", JSON.stringify(data.logs))
+          localStorage.setItem(`webhook-logs-${clientId}`, JSON.stringify(data.logs))
 
           // Process the most recent webhook
           const latestLog = data.logs[0]
@@ -173,12 +216,12 @@ export default function PaymentClient() {
         pollingIntervalRef.current = null
       }
     }
-  }, [currentTxCode, isPolling])
+  }, [currentTxCode, isPolling, clientId])
 
   const saveWebhookLog = (log: WebhookLog) => {
     const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
     setWebhookLogs(updatedLogs)
-    localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
+    localStorage.setItem(`webhook-logs-${clientId}`, JSON.stringify(updatedLogs))
 
     if (log.processedData && log.nextAction) {
       handleWebhookAction(log.processedData, log.nextAction)
@@ -186,26 +229,33 @@ export default function PaymentClient() {
   }
 
   const clearWebhookLogs = async () => {
-    setWebhookLogs([])
-    localStorage.removeItem("webhook-logs")
+    if (!clientId) return
 
-    // También limpiar logs del lado del servidor
+    setWebhookLogs([])
+    localStorage.removeItem(`webhook-logs-${clientId}`)
+
+    // También limpiar logs del lado del servidor para este cliente específico
     try {
-      await fetch("/api/webhook-logs", { method: "DELETE" })
+      await fetch(`/api/webhook-logs?clientId=${clientId}`, { method: "DELETE" })
     } catch (error) {
       console.error("Error clearing server logs:", error)
     }
 
     toast({
       title: "Logs limpiados",
-      description: "Se han eliminado todos los logs de webhook",
+      description: "Se han eliminado todos los logs de webhook para este cliente",
     })
   }
 
   const testWebhook = async () => {
+    if (!clientId) return
+
     try {
       const response = await fetch("/api/webhook", {
         method: "GET",
+        headers: {
+          'X-Client-Id': clientId
+        }
       })
       const data = await response.json()
 

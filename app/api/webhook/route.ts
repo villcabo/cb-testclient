@@ -1,16 +1,26 @@
-import { type NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
+import { NextRequest, NextResponse } from "next/server"
 
 // Función para guardar webhook log en almacenamiento
 async function storeWebhookLog(webhookLog: any) {
   try {
-    await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/webhook-logs`, {
+    console.log("[Webhook] Storing log:", JSON.stringify(webhookLog, null, 2))
+
+    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/webhook-logs`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(webhookLog),
     })
+
+    if (!response.ok) {
+      console.error("[Webhook] Failed to store log - HTTP", response.status)
+      const errorText = await response.text()
+      console.error("[Webhook] Error response:", errorText)
+    } else {
+      console.log("[Webhook] Log stored successfully")
+    }
   } catch (error) {
     console.error("[Webhook] Failed to store log:", error)
   }
@@ -39,6 +49,7 @@ interface WebhookPayload {
   txCode: string
   externalReferentId: string
   status: string
+  clientId?: string // Add clientId to webhook payload
   order?: {
     localTotalAmount: number
     localCurrency: string
@@ -63,7 +74,10 @@ export async function POST(request: NextRequest) {
     const body: WebhookPayload = await request.json()
     const headers = Object.fromEntries(request.headers.entries())
 
-    console.log("[Backend] Webhook received and sending to frontend:", JSON.stringify(body, null, 2))
+    // Extract clientId from headers or body, fallback to a default for external webhooks
+    const clientId = body.clientId || headers['x-client-id'] || 'external-webhook'
+
+    console.log("[Backend] Webhook received for client:", clientId, "- Body:", JSON.stringify(body, null, 2))
 
     let processedData = null
     let nextAction = null
@@ -75,6 +89,9 @@ export async function POST(request: NextRequest) {
           processedData = {
             type: "preview_ready",
             txCode: body.txCode,
+            externalReferenceId: body.externalReferentId,
+            status: body.status,
+            localCurrency: body.order?.localCurrency,
             order: body.order,
             collector: body.collector,
           }
@@ -85,6 +102,7 @@ export async function POST(request: NextRequest) {
           processedData = {
             type: "preview_waiting_amount",
             txCode: body.txCode,
+            localCurrency: body.order?.localCurrency,
           }
           nextAction = "show_amount_input"
           console.log("[Backend] PREVIEW with WAITING_AMOUNT - Action: show_amount_input")
@@ -125,6 +143,7 @@ export async function POST(request: NextRequest) {
 
     const webhookLog = {
       id: crypto.randomUUID(),
+      clientId: clientId, // Include clientId in log
       timestamp: new Date().toISOString(),
       method: "POST",
       headers: headers,
@@ -132,13 +151,12 @@ export async function POST(request: NextRequest) {
       status: "success",
       processedData,
       nextAction,
-      txCode: body.txCode, // Added txCode to log for filtering
+      txCode: body.txCode,
     }
 
-    console.log("[Backend] Created webhook log with ID:", webhookLog.id, "- Storing and sending notification...")
+    console.log("[Backend] Created webhook log with ID:", webhookLog.id, "for client:", clientId, "- Storing and sending notification...")
 
     await storeWebhookLog(webhookLog)
-
     await sendNotification(webhookLog)
 
     console.log("[Backend] Webhook log stored and notification sent for log ID:", webhookLog.id)
@@ -147,6 +165,7 @@ export async function POST(request: NextRequest) {
       message: "Webhook processed successfully",
       received: body,
       logId: webhookLog.id,
+      clientId: clientId,
       processedData,
       nextAction,
     })
@@ -155,6 +174,7 @@ export async function POST(request: NextRequest) {
 
     const errorLog = {
       id: crypto.randomUUID(),
+      clientId: 'error-webhook', // Default clientId for error logs
       timestamp: new Date().toISOString(),
       method: "POST",
       headers: Object.fromEntries(request.headers.entries()),
@@ -177,16 +197,20 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  const headers = Object.fromEntries(request.headers.entries())
+  const clientId = headers['x-client-id'] || 'test-webhook'
+
   const webhookLog = {
     id: crypto.randomUUID(),
+    clientId: clientId,
     timestamp: new Date().toISOString(),
     method: "GET",
-    headers: Object.fromEntries(request.headers.entries()),
-    body: null,
+    headers: headers,
+    body: { test: true, message: "Test webhook call" },
     status: "success",
   }
 
-  console.log("[Webhook] Test webhook called with ID:", webhookLog.id)
+  console.log("[Webhook] Test webhook called with ID:", webhookLog.id, "for client:", clientId)
 
   await storeWebhookLog(webhookLog)
   await sendNotification(webhookLog)
@@ -194,5 +218,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     message: "Webhook endpoint is active",
     logId: webhookLog.id,
+    clientId: clientId,
+    logData: webhookLog,
   })
 }
