@@ -132,13 +132,16 @@ export async function POST(request: NextRequest) {
       status: "success",
       processedData,
       nextAction,
+      txCode: body.txCode, // Added txCode to log for filtering
     }
 
-    console.log("[Backend] Created webhook log with ID:", webhookLog.id, "- Sending notification...")
+    console.log("[Backend] Created webhook log with ID:", webhookLog.id, "- Storing and sending notification...")
+
+    await storeWebhookLog(webhookLog)
 
     await sendNotification(webhookLog)
 
-    console.log("[Backend] Notification sent successfully for log ID:", webhookLog.id)
+    console.log("[Backend] Webhook log stored and notification sent for log ID:", webhookLog.id)
 
     return NextResponse.json({
       message: "Webhook processed successfully",
@@ -160,6 +163,7 @@ export async function POST(request: NextRequest) {
       status: "error",
     }
 
+    await storeWebhookLog(errorLog)
     await sendNotification(errorLog)
 
     return NextResponse.json(
@@ -184,6 +188,7 @@ export async function GET(request: NextRequest) {
 
   console.log("[Webhook] Test webhook called with ID:", webhookLog.id)
 
+  await storeWebhookLog(webhookLog)
   await sendNotification(webhookLog)
 
   return NextResponse.json({
