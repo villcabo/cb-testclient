@@ -70,9 +70,6 @@ export default function PaymentClient() {
   const [loading, setLoading] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
   const [showWebhookLogs, setShowWebhookLogs] = useState(true) // Cambiar a true por defecto para mostrar logs inmediatamente
-  const [sseConnectionStatus, setSseConnectionStatus] = useState<"connecting" | "connected" | "disconnected">(
-    "disconnected",
-  )
   const [notificationStatus, setNotificationStatus] = useState<"inactive" | "connecting" | "active">("inactive")
   const { toast } = useToast()
   const [currentTxCode, setCurrentTxCode] = useState<string | null>(null) // Added to track current transaction
@@ -114,7 +111,7 @@ export default function PaymentClient() {
       setCurrentScreen("config")
     }
 
-    // Inicializar sistema de notificaciones push (Long Polling)
+    // Inicializar sistema de notificaciones push (long polling)
     console.log("[Notifications] Starting push notification system...")
     setNotificationStatus("connecting")
 
@@ -147,20 +144,20 @@ export default function PaymentClient() {
 
                 console.log("[Frontend] Webhook received:", JSON.stringify(webhookLog, null, 2))
 
-                // Actualizar logs inmediatamente
+                // Update logs immediately
                 setWebhookLogs((prevLogs) => {
                   const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
                   localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
                   return updatedLogs
                 })
 
-                // Manejar acciones del webhook si las hay
+                // Handle webhook actions
                 if (webhookLog.processedData && webhookLog.nextAction) {
                   console.log("[Frontend] Executing webhook action:", webhookLog.nextAction)
                   handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
                 }
 
-                // Mostrar notificación toast para webhooks importantes
+                // Show toast notification
                 if (webhookLog.body?.type) {
                   const typeMessages = {
                     PREVIEW: "Webhook Preview recibido",
@@ -177,7 +174,7 @@ export default function PaymentClient() {
             })
           }
 
-          // Actualizar timestamp para próxima consulta
+          // Update timestamp for next query
           if (data.timestamp) {
             lastTimestamp = data.timestamp
           }
@@ -187,17 +184,17 @@ export default function PaymentClient() {
           } else {
             console.error("[Notifications] Error:", error)
             setNotificationStatus("inactive")
-            // Esperar 5 segundos antes de reintentar
+            // Wait 5 seconds before retrying
             await new Promise((resolve) => setTimeout(resolve, 5000))
           }
         }
       }
     }
 
-    // Iniciar el listener
+    // Start the listener
     startNotificationListener()
 
-    // Cleanup al desmontar el componente
+    // Cleanup on unmount
     return () => {
       console.log("[Notifications] Stopping notification system")
       isActive = false
@@ -854,7 +851,7 @@ export default function PaymentClient() {
                   />
                   <span className="text-xs text-muted-foreground">
                     {notificationStatus === "active"
-                      ? "Push Activo"
+                      ? "Monitoreando"
                       : notificationStatus === "connecting"
                         ? "Conectando..."
                         : "Desconectado"}

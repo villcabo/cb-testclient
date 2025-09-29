@@ -1,7 +1,21 @@
 import { type NextRequest, NextResponse } from "next/server"
 import crypto from "crypto"
 
-// Función para enviar notificación push
+// Función para guardar webhook log en almacenamiento
+async function storeWebhookLog(webhookLog: any) {
+  try {
+    await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/webhook-logs`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(webhookLog),
+    })
+  } catch (error) {
+    console.error("[Webhook] Failed to store log:", error)
+  }
+}
+
 async function sendNotification(webhookLog: any) {
   try {
     await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/notifications`, {
@@ -17,21 +31,6 @@ async function sendNotification(webhookLog: any) {
     })
   } catch (error) {
     console.error("[Webhook] Failed to send notification:", error)
-  }
-}
-
-// Función para guardar webhook log en almacenamiento
-async function storeWebhookLog(webhookLog: any) {
-  try {
-    await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/webhook-logs`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(webhookLog),
-    })
-  } catch (error) {
-    console.error("[Webhook] Failed to store log:", error)
   }
 }
 
@@ -137,8 +136,7 @@ export async function POST(request: NextRequest) {
 
     console.log("[Backend] Created webhook log with ID:", webhookLog.id, "- Sending notification...")
 
-    // Send notification and store log in parallel
-    await Promise.all([sendNotification(webhookLog), storeWebhookLog(webhookLog)])
+    await sendNotification(webhookLog)
 
     console.log("[Backend] Notification sent successfully for log ID:", webhookLog.id)
 
@@ -162,8 +160,7 @@ export async function POST(request: NextRequest) {
       status: "error",
     }
 
-    // Send error notification and store log in parallel
-    await Promise.all([sendNotification(errorLog), storeWebhookLog(errorLog)])
+    await sendNotification(errorLog)
 
     return NextResponse.json(
       {
@@ -187,8 +184,7 @@ export async function GET(request: NextRequest) {
 
   console.log("[Webhook] Test webhook called with ID:", webhookLog.id)
 
-  // Send test notification and store log in parallel
-  await Promise.all([sendNotification(webhookLog), storeWebhookLog(webhookLog)])
+  await sendNotification(webhookLog)
 
   return NextResponse.json({
     message: "Webhook endpoint is active",
