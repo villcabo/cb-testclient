@@ -374,11 +374,16 @@ export default function PaymentClient() {
 
       if (!response.ok) throw new Error("Error setting amount")
 
-      const data = await response.json()
-      if (data.status === "CONFIRMED_AMOUNT") {
-        setStatus("ready_to_confirm")
-        setCurrentScreen("confirmation")
-      }
+      console.log("[v0] Amount set successfully, waiting for webhook with READY_TO_CONFIRM status...")
+
+      // Volver a la pantalla de espera y continuar polling
+      setCurrentScreen("waiting-webhook")
+      setIsPolling(true)
+
+      toast({
+        title: "Monto Confirmado",
+        description: "Esperando confirmación del servidor...",
+      })
     } catch (error) {
       toast({
         title: "Error",
@@ -446,20 +451,24 @@ export default function PaymentClient() {
       case "show_confirmation":
         setPaymentData({
           txCode: processedData.txCode,
+          externalReferenceId: processedData.externalReferenceId,
+          status: processedData.status,
+          localCurrency: processedData.localCurrency,
           order: processedData.order,
           collector: processedData.collector,
         })
         setStatus("ready_to_confirm")
         setCurrentScreen("confirmation")
         toast({
-          title: "QR Procesado",
-          description: "Monto cerrado detectado. Confirma el pago.",
+          title: "Listo para Confirmar",
+          description: "Revisa los detalles y confirma el pago.",
         })
         break
 
       case "show_amount_input":
         setPaymentData({
           txCode: processedData.txCode,
+          localCurrency: processedData.localCurrency,
         })
         setStatus("waiting_amount")
         setCurrentScreen("amount-input")
