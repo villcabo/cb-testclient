@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -70,7 +70,8 @@ export default function PaymentClient() {
   const [loading, setLoading] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
   const [showWebhookLogs, setShowWebhookLogs] = useState(true) // Cambiar a true por defecto para mostrar logs inmediatamente
-  const [notificationStatus, setNotificationStatus] = useState<"inactive" | "connecting" | "active">("inactive")
+  const [isPolling, setIsPolling] = useState(false)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const { toast } = useToast()
   const [currentTxCode, setCurrentTxCode] = useState<string | null>(null) // Added to track current transaction
 
@@ -110,97 +111,69 @@ export default function PaymentClient() {
     } else {
       setCurrentScreen("config")
     }
+  }, [])
 
-    // Inicializar sistema de notificaciones push (long polling)
-    console.log("[Notifications] Starting push notification system...")
-    setNotificationStatus("connecting")
+  useEffect(() => {
+    if (!currentTxCode || !isPolling) {
+      return
+    }
 
-    const clientId = crypto.randomUUID()
-    let lastTimestamp = "0"
-    let isActive = true
+    console.log(`[Polling] Starting polling for txCode: ${currentTxCode}`)
 
-    const startNotificationListener = async () => {
-      while (isActive) {
-        try {
-          console.log(`[Notifications] Checking for updates since ${lastTimestamp}`)
-          setNotificationStatus("active")
+    const pollWebhooks = async () => {
+      try {
+        const response = await fetch(`/api/webhook-logs?txCode=${currentTxCode}`)
 
-          const response = await fetch(`/api/notifications?clientId=${clientId}&since=${lastTimestamp}`, {
-            signal: AbortSignal.timeout(35000), // 35 second timeout
-          })
+        if (!response.ok) {
+          console.error(`[Polling] Error: HTTP ${response.status}`)
+          return
+        }
 
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`)
-          }
+        const data = await response.json()
 
-          const data = await response.json()
+        if (data.logs && data.logs.length > 0) {
+          console.log(`[Polling] Received ${data.logs.length} webhook logs`)
 
-          if (data.notifications && data.notifications.length > 0) {
-            console.log(`[Notifications] Received ${data.notifications.length} notifications`)
+          // Update logs
+          setWebhookLogs(data.logs)
+          localStorage.setItem("webhook-logs", JSON.stringify(data.logs))
 
-            data.notifications.forEach((notification: any) => {
-              if (notification.data.type === "webhook-log") {
-                const webhookLog = notification.data.data
+          // Process the most recent webhook
+          const latestLog = data.logs[0]
 
-                console.log("[Frontend] Webhook received:", JSON.stringify(webhookLog, null, 2))
+          if (latestLog.processedData && latestLog.nextAction) {
+            console.log("[Polling] Processing webhook action:", latestLog.nextAction)
+            handleWebhookAction(latestLog.processedData, latestLog.nextAction)
 
-                // Update logs immediately
-                setWebhookLogs((prevLogs) => {
-                  const updatedLogs = [webhookLog, ...prevLogs].slice(0, 50)
-                  localStorage.setItem("webhook-logs", JSON.stringify(updatedLogs))
-                  return updatedLogs
-                })
-
-                // Handle webhook actions
-                if (webhookLog.processedData && webhookLog.nextAction) {
-                  console.log("[Frontend] Executing webhook action:", webhookLog.nextAction)
-                  handleWebhookAction(webhookLog.processedData, webhookLog.nextAction)
-                }
-
-                // Show toast notification
-                if (webhookLog.body?.type) {
-                  const typeMessages = {
-                    PREVIEW: "Webhook Preview recibido",
-                    CONFIRM: "Webhook Confirm recibido",
-                    REFUND: "Webhook Refund recibido",
-                  }
-
-                  toast({
-                    title: "Webhook Recibido",
-                    description: typeMessages[webhookLog.body.type] || "Nuevo webhook recibido",
-                  })
-                }
-              }
-            })
-          }
-
-          // Update timestamp for next query
-          if (data.timestamp) {
-            lastTimestamp = data.timestamp
-          }
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError") {
-            console.log("[Notifications] Request timeout, retrying...")
-          } else {
-            console.error("[Notifications] Error:", error)
-            setNotificationStatus("inactive")
-            // Wait 5 seconds before retrying
-            await new Promise((resolve) => setTimeout(resolve, 5000))
+            // Stop polling after receiving expected webhook
+            if (
+              latestLog.nextAction === "show_confirmation" ||
+              latestLog.nextAction === "show_amount_input" ||
+              latestLog.nextAction === "show_success"
+            ) {
+              setIsPolling(false)
+            }
           }
         }
+      } catch (error) {
+        console.error("[Polling] Error:", error)
       }
     }
 
-    // Start the listener
-    startNotificationListener()
+    // Poll immediately
+    pollWebhooks()
 
-    // Cleanup on unmount
+    // Then poll every 2 seconds
+    pollingIntervalRef.current = setInterval(pollWebhooks, 2000)
+
     return () => {
-      console.log("[Notifications] Stopping notification system")
-      isActive = false
-      setNotificationStatus("inactive")
+      if (pollingIntervalRef.current) {
+        console.log("[Polling] Stopping polling")
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
     }
-  }, [])
+  }, [currentTxCode, isPolling])
 
   const saveWebhookLog = (log: WebhookLog) => {
     const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
@@ -359,9 +332,9 @@ export default function PaymentClient() {
       if (data.txCode) {
         setCurrentTxCode(data.txCode)
         setPaymentData({ txCode: data.txCode })
-        console.log("[v0] TxCode received:", data.txCode, "- Waiting for webhook...")
+        console.log("[v0] TxCode received:", data.txCode, "- Starting polling for webhooks...")
 
-        // Show waiting screen instead of immediately showing amount or confirmation
+        setIsPolling(true)
         setCurrentScreen("waiting-webhook")
 
         toast({
@@ -440,7 +413,8 @@ export default function PaymentClient() {
 
       const data = await response.json()
       if (data.status === "PROCESSING") {
-        setCurrentScreen("processing") // Wait for COMPLETED webhook
+        setIsPolling(true)
+        setCurrentScreen("processing")
       }
     } catch (error) {
       setStatus("error")
@@ -455,13 +429,14 @@ export default function PaymentClient() {
   }
 
   const resetFlow = () => {
+    setIsPolling(false)
     setCurrentScreen("qr-input")
     setQrCode("")
     setAmount("")
     setPaymentData({})
     setStatus("idle")
     setCurrentTxCode(null)
-    setWebhookLogs([]) // Clear logs when resetting
+    setWebhookLogs([])
   }
 
   const handleWebhookAction = (processedData: any, nextAction: string) => {
@@ -840,22 +815,8 @@ export default function PaymentClient() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
-                  <div
-                    className={`w-2 h-2 rounded-full ${
-                      notificationStatus === "active"
-                        ? "bg-green-500"
-                        : notificationStatus === "connecting"
-                          ? "bg-yellow-500 animate-pulse"
-                          : "bg-red-500"
-                    }`}
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    {notificationStatus === "active"
-                      ? "Monitoreando"
-                      : notificationStatus === "connecting"
-                        ? "Conectando..."
-                        : "Desconectado"}
-                  </span>
+                  <div className={`w-2 h-2 rounded-full ${isPolling ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+                  <span className="text-xs text-muted-foreground">{isPolling ? "Monitoreando" : "Inactivo"}</span>
                 </div>
                 <Badge variant="outline" className="text-xs">
                   {webhookLogs.filter((log) => log.status === "success").length} exitosas
