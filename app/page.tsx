@@ -547,6 +547,53 @@ export default function PaymentClient() {
     }
   }
 
+  const rejectPayment = async () => {
+    try {
+      setLoading(true)
+
+      const response = await fetch("/api/payments/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Base-URL": apiBaseUrl,
+        },
+        body: JSON.stringify({
+          txCode: paymentData.txCode,
+          externalReferenceId: crypto.randomUUID(),
+          status: "rejected",
+        }),
+      })
+
+      if (!response.ok) throw new Error("Error rejecting payment")
+
+      console.log("[v0] Payment rejected successfully - showing cancellation screen directly")
+
+      // Actualizar datos y mostrar pantalla de cancelación directamente
+      setPaymentData((prev) => ({
+        ...prev,
+        status: "CANCELLED",
+      }))
+      setStatus("cancelled")
+      setCurrentScreen("cancelled")
+
+      toast({
+        title: "Pago Rechazado",
+        description: "La transacción ha sido rechazada exitosamente.",
+        variant: "destructive",
+      })
+    } catch (error) {
+      setStatus("error")
+      toast({
+        title: "Error",
+        description: "Error al rechazar el pago",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const resetFlow = () => {
     setIsPolling(false)
     setCurrentScreen("qr-input")
@@ -841,6 +888,21 @@ export default function PaymentClient() {
                     {paymentData.order.userTotalAmount} {paymentData.order.userCurrency}
                   </span>
                 </div>
+
+                {/* Mostrar tipo de cambio si las monedas son diferentes */}
+                {paymentData.order.localCurrency !== paymentData.order.userCurrency && (
+                  <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-lg mt-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-blue-700 dark:text-blue-300 font-medium">Tipo de Cambio</span>
+                      <span className="text-sm text-blue-800 dark:text-blue-200 font-semibold">
+                        1 {paymentData.order.userCurrency} = {(paymentData.order.localTotalAmount / paymentData.order.userTotalAmount).toFixed(4)} {paymentData.order.localCurrency}
+                      </span>
+                    </div>
+                    <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                      Conversión: {paymentData.order.userTotalAmount} {paymentData.order.userCurrency} → {paymentData.order.localTotalAmount} {paymentData.order.localCurrency}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -859,8 +921,9 @@ export default function PaymentClient() {
           </div>
 
           <div className="flex gap-3">
-            <Button onClick={resetFlow} variant="outline" className="flex-1 bg-transparent">
-              Cancelar
+            <Button onClick={rejectPayment} variant="outline" className="flex-1 bg-transparent border-red-500 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20" disabled={loading}>
+              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Rechazar
             </Button>
             <Button onClick={confirmPayment} className="flex-1" disabled={loading}>
               {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
@@ -995,10 +1058,6 @@ export default function PaymentClient() {
         <CollapsibleContent>
           <CardContent className="pt-0 h-[calc(100vh-320px)]">
             <div className="flex gap-2 mb-4">
-              <Button onClick={testWebhook} variant="outline" size="sm">
-                <Eye className="w-4 h-4 mr-2" />
-                Probar Webhook
-              </Button>
               <Button onClick={clearWebhookLogs} variant="outline" size="sm" disabled={webhookLogs.length === 0}>
                 <Trash2 className="w-4 h-4 mr-2" />
                 Limpiar Logs
