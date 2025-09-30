@@ -20,10 +20,11 @@ import {
   ChevronDown,
   Trash2,
   Eye,
+  X,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-type PaymentStatus = "idle" | "preview" | "waiting_amount" | "ready_to_confirm" | "processing" | "completed" | "error"
+type PaymentStatus = "idle" | "preview" | "waiting_amount" | "ready_to_confirm" | "processing" | "completed" | "cancelled" | "error"
 
 interface PaymentData {
   txCode?: string
@@ -95,7 +96,7 @@ function getClientId(): string {
 
 export default function PaymentClient() {
   const [currentScreen, setCurrentScreen] = useState<
-    "config" | "qr-input" | "waiting-webhook" | "amount-input" | "confirmation" | "processing" | "success"
+    "config" | "qr-input" | "waiting-webhook" | "amount-input" | "confirmation" | "processing" | "success" | "cancelled"
   >("config") // Inicializar temporalmente en config, se cambiará en useEffect
   const [apiKey, setApiKey] = useState("")
   const [apiBaseUrl, setApiBaseUrl] = useState("https://stage-api.sintesis.com.bo")
@@ -193,10 +194,11 @@ export default function PaymentClient() {
               txCode: webhook.txCode,
               externalReferenceId: webhook.externalReferentId,
               status: webhook.status,
-              localCurrency: webhook.localCurrency,
+              localCurrency: webhook.order?.localCurrency || webhook.localCurrency,
               order: webhook.order,
               collector: webhook.collector,
             }
+            console.log("[Polling] READY_TO_CONFIRM webhook received - showing confirmation screen")
           } else if (webhook.type === "PREVIEW" && webhook.status === "WAITING_AMOUNT") {
             nextAction = "show_amount_input"
             processedData = {
@@ -204,6 +206,7 @@ export default function PaymentClient() {
               txCode: webhook.txCode,
               localCurrency: webhook.localCurrency,
             }
+            console.log("[Polling] WAITING_AMOUNT webhook received - showing amount input screen")
           } else if (webhook.type === "CONFIRM" && webhook.status === "COMPLETED") {
             nextAction = "show_success"
             processedData = {
@@ -211,7 +214,30 @@ export default function PaymentClient() {
               txCode: webhook.txCode,
               completedDate: webhook.completedDate,
             }
+            console.log("[Polling] COMPLETED webhook received - showing success screen")
+          } else if (webhook.type === "CONFIRM" && webhook.status === "CANCELLED") {
+            nextAction = "show_cancelled"
+            processedData = {
+              type: "payment_cancelled",
+              txCode: webhook.txCode,
+              externalReferenceId: webhook.externalReferentId,
+              status: webhook.status,
+            }
+            console.log("[Polling] CANCELLED webhook received - showing cancellation screen")
+          } else {
+            console.log(`[Polling] Unhandled webhook state: ${webhook.type} - ${webhook.status}`)
           }
+
+          // Agregar webhook a los logs locales para mostrar en la vista
+          const webhookLog = {
+            id: `webhook-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            method: "WEBHOOK",
+            headers: {},
+            body: webhook,
+            status: "success" as const
+          }
+          setWebhookLogs(prev => [webhookLog, ...prev])
 
           if (nextAction && processedData) {
             console.log("[Polling] Processing webhook action:", nextAction)
@@ -221,7 +247,8 @@ export default function PaymentClient() {
             if (
               nextAction === "show_confirmation" ||
               nextAction === "show_amount_input" ||
-              nextAction === "show_success"
+              nextAction === "show_success" ||
+              nextAction === "show_cancelled"
             ) {
               setIsPolling(false)
             }
@@ -343,7 +370,6 @@ export default function PaymentClient() {
 
   const getToken = async () => {
     try {
-      setLoading(true)
       console.log("[v0] Requesting token...")
 
       const response = await fetch("/api/auth/token", {
@@ -369,9 +395,8 @@ export default function PaymentClient() {
         variant: "destructive",
       })
       throw error
-    } finally {
-      setLoading(false)
     }
+    // Quitar el finally con setLoading(false) - el loading se maneja en previewPayment
   }
 
   const previewPayment = async () => {
@@ -577,6 +602,20 @@ export default function PaymentClient() {
         toast({
           title: "Pago Completado",
           description: "La transacción se procesó exitosamente.",
+        })
+        break
+
+      case "show_cancelled":
+        setPaymentData((prev) => ({
+          ...prev,
+          status: processedData.status,
+        }))
+        setStatus("cancelled")
+        setCurrentScreen("cancelled")
+        toast({
+          title: "Transacción Cancelada",
+          description: "La transacción ha sido cancelada por timeout o por el sistema.",
+          variant: "destructive",
         })
         break
 
@@ -896,6 +935,35 @@ export default function PaymentClient() {
     </div>
   )
 
+  const renderCancelledScreen = () => (
+    <div className="max-w-md mx-auto space-y-6">
+      <Card>
+        <CardHeader className="text-center">
+          <div className="mx-auto w-12 h-12 bg-red-500/10 rounded-lg flex items-center justify-center mb-4">
+            <X className="w-6 h-6 text-red-500" />
+          </div>
+          <CardTitle>Transacción Cancelada</CardTitle>
+          <CardDescription>La transacción ha sido cancelada por el sistema</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-red-50 dark:bg-red-950/20 rounded-lg text-center">
+            <Badge variant="secondary" className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+              CANCELLED
+            </Badge>
+            <div className="mt-2 text-sm text-muted-foreground">Código: {paymentData.txCode}</div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              La transacción no se completó dentro del tiempo límite o fue cancelada por el sistema.
+            </div>
+          </div>
+
+          <Button onClick={resetFlow} className="w-full">
+            Nuevo Pago
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
   const renderWebhookLogsPanel = () => (
     <Card className="h-full">
       <Collapsible open={showWebhookLogs} onOpenChange={setShowWebhookLogs}>
@@ -1114,6 +1182,7 @@ export default function PaymentClient() {
                 {currentScreen === "confirmation" && renderConfirmationScreen()}
                 {currentScreen === "processing" && renderProcessingScreen()}
                 {currentScreen === "success" && renderSuccessScreen()}
+                {currentScreen === "cancelled" && renderCancelledScreen()}
               </div>
             </div>
           </div>

@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET endpoint para debugging (obtener todos los webhooks)
+// GET endpoint para debugging (obtener estadísticas de todos los webhooks)
 export async function GET() {
   try {
     const stats = webhookStore.getStats()
@@ -54,7 +54,10 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      stats
+      stats: {
+        ...stats,
+        message: `Total: ${stats.totalWebhooks}, Unread: ${stats.unreadWebhooks}, Read: ${stats.readWebhooks}`
+      }
     })
   } catch (error) {
     console.error("[Webhook] Error getting webhook stats:", error)

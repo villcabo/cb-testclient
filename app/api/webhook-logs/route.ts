@@ -16,23 +16,27 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log(`[WebhookLogs] Searching for webhook with txCode: ${txCode}`)
+    console.log(`[WebhookLogs] Searching for unread webhook with txCode: ${txCode}`)
 
     const webhook = webhookStore.get(txCode)
 
     if (!webhook) {
-      console.log(`[WebhookLogs] No webhook found for txCode: ${txCode}`)
+      console.log(`[WebhookLogs] No unread webhook found for txCode: ${txCode}`)
       return NextResponse.json(
         {
           success: false,
-          message: "Webhook not found or expired",
+          message: "Webhook not found, expired, or already read",
           txCode
         },
         { status: 404 }
       )
     }
 
-    console.log(`[WebhookLogs] Found webhook for txCode: ${txCode}`, webhook)
+    console.log(`[WebhookLogs] Found unread webhook for txCode: ${txCode}`, webhook)
+
+    // Marcar como leído después de encontrarlo
+    webhookStore.markAsRead(txCode)
+    console.log(`[WebhookLogs] Marked webhook as read for txCode: ${txCode}`)
 
     return NextResponse.json({
       success: true,
@@ -52,7 +56,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST endpoint para forzar limpieza (para testing/debugging)
+// POST endpoint para operaciones especiales
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -68,8 +72,29 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    if (body.action === 'mark_read' && body.txCode) {
+      const success = webhookStore.markAsRead(body.txCode)
+
+      return NextResponse.json({
+        success,
+        message: success ? `Marked txCode ${body.txCode} as read` : `TxCode ${body.txCode} not found`,
+        txCode: body.txCode
+      })
+    }
+
+    if (body.action === 'get_any' && body.txCode) {
+      // Obtener webhook independientemente del estado de lectura (para debugging)
+      const webhook = webhookStore.getAny(body.txCode)
+
+      return NextResponse.json({
+        success: !!webhook,
+        webhook,
+        message: webhook ? "Webhook found" : "Webhook not found or expired"
+      })
+    }
+
     return NextResponse.json(
-      { error: "Invalid action" },
+      { error: "Invalid action. Supported: cleanup, mark_read, get_any" },
       { status: 400 }
     )
 
