@@ -100,7 +100,7 @@ export default function PaymentClient() {
   const [apiKey, setApiKey] = useState("")
   const [apiBaseUrl, setApiBaseUrl] = useState("https://stage-api.sintesis.com.bo")
   const [token, setToken] = useState("")
-  const [qrCode, setQrCode] = useState("")
+  const [qrCode, setQrCode] = useState("00020101021102080000000041370012com.TESTbind98113069226478599020143220018B00000461195ET000Z5015001130707101020512600220000531909000067076630520454115802AR5918GRANJAS CARNAVE SA6012BUENOS AIRES61041000530303262100706S0301281050001Z6304F127")
   const [amount, setAmount] = useState("")
   const [paymentData, setPaymentData] = useState<PaymentData>({})
   const [status, setStatus] = useState<PaymentStatus>("idle")
@@ -157,15 +157,16 @@ export default function PaymentClient() {
   }, [])
 
   useEffect(() => {
-    if (!currentTxCode || !isPolling || !clientId) {
+    if (!currentTxCode || !isPolling) {
       return
     }
 
-    console.log(`[Polling] Starting polling for client: ${clientId}, txCode: ${currentTxCode}`)
+    console.log(`[Polling] Starting polling for txCode: ${currentTxCode}`)
 
     const pollWebhooks = async () => {
       try {
-        const response = await fetch(`/api/webhook-logs?clientId=${clientId}&txCode=${currentTxCode}`)
+        // Usar solo txCode en lugar de clientId + txCode
+        const response = await fetch(`/api/webhook-logs?txCode=${currentTxCode}`)
 
         if (!response.ok) {
           console.error(`[Polling] Error: HTTP ${response.status}`)
@@ -174,29 +175,59 @@ export default function PaymentClient() {
 
         const data = await response.json()
 
-        if (data.logs && data.logs.length > 0) {
-          console.log(`[Polling] Received ${data.logs.length} webhook logs for client: ${clientId}`)
+        // Verificar si encontró el webhook (nueva estructura de respuesta)
+        if (data.success && data.webhook) {
+          console.log(`[Polling] Found webhook for txCode: ${currentTxCode}`, data.webhook)
 
-          // Update logs
-          setWebhookLogs(data.logs)
-          localStorage.setItem(`webhook-logs-${clientId}`, JSON.stringify(data.logs))
+          // Procesar directamente el webhook encontrado
+          const webhook = data.webhook
 
-          // Process the most recent webhook
-          const latestLog = data.logs[0]
+          // Determinar la acción basada en el tipo y estado del webhook
+          let nextAction = null
+          let processedData = null
 
-          if (latestLog.processedData && latestLog.nextAction) {
-            console.log("[Polling] Processing webhook action:", latestLog.nextAction)
-            handleWebhookAction(latestLog.processedData, latestLog.nextAction)
+          if (webhook.type === "PREVIEW" && webhook.status === "READY_TO_CONFIRM") {
+            nextAction = "show_confirmation"
+            processedData = {
+              type: "preview_ready",
+              txCode: webhook.txCode,
+              externalReferenceId: webhook.externalReferentId,
+              status: webhook.status,
+              localCurrency: webhook.localCurrency,
+              order: webhook.order,
+              collector: webhook.collector,
+            }
+          } else if (webhook.type === "PREVIEW" && webhook.status === "WAITING_AMOUNT") {
+            nextAction = "show_amount_input"
+            processedData = {
+              type: "preview_waiting_amount",
+              txCode: webhook.txCode,
+              localCurrency: webhook.localCurrency,
+            }
+          } else if (webhook.type === "CONFIRM" && webhook.status === "COMPLETED") {
+            nextAction = "show_success"
+            processedData = {
+              type: "payment_completed",
+              txCode: webhook.txCode,
+              completedDate: webhook.completedDate,
+            }
+          }
+
+          if (nextAction && processedData) {
+            console.log("[Polling] Processing webhook action:", nextAction)
+            handleWebhookAction(processedData, nextAction)
 
             // Stop polling after receiving expected webhook
             if (
-              latestLog.nextAction === "show_confirmation" ||
-              latestLog.nextAction === "show_amount_input" ||
-              latestLog.nextAction === "show_success"
+              nextAction === "show_confirmation" ||
+              nextAction === "show_amount_input" ||
+              nextAction === "show_success"
             ) {
               setIsPolling(false)
             }
           }
+        } else {
+          console.log(`[Polling] No webhook found for txCode: ${currentTxCode}`)
         }
       } catch (error) {
         console.error("[Polling] Error:", error)
@@ -216,7 +247,7 @@ export default function PaymentClient() {
         pollingIntervalRef.current = null
       }
     }
-  }, [currentTxCode, isPolling, clientId])
+  }, [currentTxCode, isPolling]) // Removed clientId dependency
 
   const saveWebhookLog = (log: WebhookLog) => {
     const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
@@ -229,44 +260,52 @@ export default function PaymentClient() {
   }
 
   const clearWebhookLogs = async () => {
-    if (!clientId) return
-
     setWebhookLogs([])
     localStorage.removeItem(`webhook-logs-${clientId}`)
 
-    // También limpiar logs del lado del servidor para este cliente específico
-    try {
-      await fetch(`/api/webhook-logs?clientId=${clientId}`, { method: "DELETE" })
-    } catch (error) {
-      console.error("Error clearing server logs:", error)
-    }
-
     toast({
       title: "Logs limpiados",
-      description: "Se han eliminado todos los logs de webhook para este cliente",
+      description: "Se han eliminado todos los logs de webhook",
     })
   }
 
   const testWebhook = async () => {
-    if (!clientId) return
-
     try {
-      const response = await fetch("/api/webhook", {
-        method: "GET",
-        headers: {
-          'X-Client-Id': clientId
-        }
-      })
-      const data = await response.json()
-
-      if (data.logData) {
-        saveWebhookLog(data.logData)
+      // Simular un webhook de prueba usando el nuevo sistema
+      const testWebhookData = {
+        type: "PREVIEW",
+        txCode: `test-${Date.now()}`,
+        externalReferentId: `test-ref-${Date.now()}`,
+        status: "WAITING_AMOUNT"
       }
 
-      toast({
-        title: "Webhook probado",
-        description: "Se ha enviado una llamada de prueba al webhook",
+      const response = await fetch("/api/webhook", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(testWebhookData)
       })
+
+      if (response.ok) {
+        toast({
+          title: "Webhook probado",
+          description: `Se ha creado un webhook de prueba con txCode: ${testWebhookData.txCode}`,
+        })
+
+        // Agregar el webhook de prueba a los logs locales para visualización
+        const testLog = {
+          id: `test-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          method: "POST",
+          headers: {},
+          body: testWebhookData,
+          status: "success" as const
+        }
+        setWebhookLogs(prev => [testLog, ...prev])
+      } else {
+        throw new Error("Error en respuesta del webhook")
+      }
     } catch (error) {
       toast({
         title: "Error",
