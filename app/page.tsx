@@ -21,6 +21,7 @@ import {
   Trash2,
   Eye,
   X,
+  Code2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -107,7 +108,8 @@ export default function PaymentClient() {
   const [status, setStatus] = useState<PaymentStatus>("idle")
   const [loading, setLoading] = useState(false)
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
-  const [showWebhookLogs, setShowWebhookLogs] = useState(true) // Cambiar a true por defecto para mostrar logs inmediatamente
+  const [showWebhookLogs, setShowWebhookLogs] = useState(false) // Cambiar a false para ocultar por defecto
+  const [showWebhookModal, setShowWebhookModal] = useState(false) // Estado para el modal de logs
   const [isPolling, setIsPolling] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const { toast } = useToast()
@@ -1208,6 +1210,157 @@ export default function PaymentClient() {
     </div>
   )
 
+  const renderWebhookLogsModal = () => (
+    showWebhookModal && (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="bg-background border rounded-lg shadow-lg w-full max-w-4xl h-[80vh] flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center">
+                <Activity className="w-4 h-4 text-blue-500" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold">Logs de Webhook</h2>
+                <p className="text-sm text-muted-foreground">{webhookLogs.length} llamadas registradas</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <div className={`w-2 h-2 rounded-full ${isPolling ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+                <span className="text-xs text-muted-foreground">{isPolling ? "Monitoreando" : "Inactivo"}</span>
+              </div>
+              <Badge variant="outline" className="text-xs">
+                {webhookLogs.filter((log) => log.status === "success").length} exitosas
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowWebhookModal(false)}
+                className="h-8 w-8 p-0"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-hidden p-4">
+            <div className="flex gap-2 mb-4">
+              <Button onClick={clearWebhookLogs} variant="outline" size="sm" disabled={webhookLogs.length === 0}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Limpiar Logs
+              </Button>
+            </div>
+
+            {webhookLogs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+                <Activity className="w-12 h-12 mb-4 opacity-50" />
+                <p className="text-lg font-medium">No hay llamadas de webhook registradas</p>
+                <p className="text-sm">Las llamadas aparecerán aquí automáticamente durante las transacciones</p>
+              </div>
+            ) : (
+              <div className="space-y-3 h-full overflow-y-auto pr-2">
+                {webhookLogs.map((log) => (
+                  <div key={log.id} className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant={log.status === "success" ? "default" : "destructive"} className="text-xs">
+                          {log.method}
+                        </Badge>
+                        {log.body?.type && (
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs ${
+                              log.body.type === "PREVIEW"
+                                ? "bg-blue-100 text-blue-800"
+                                : log.body.type === "CONFIRM"
+                                  ? "bg-green-100 text-green-800"
+                                  : log.body.type === "REFUND"
+                                    ? "bg-orange-100 text-orange-800"
+                                    : ""
+                            }`}
+                          >
+                            {log.body.type}
+                          </Badge>
+                        )}
+                        {log.body?.status && (
+                          <Badge variant="outline" className="text-xs">
+                            {log.body.status}
+                          </Badge>
+                        )}
+                        <span className="text-sm font-mono">{new Date(log.timestamp).toLocaleString()}</span>
+                      </div>
+                      <Badge variant="outline" className={log.status === "success" ? "text-green-600" : "text-red-600"}>
+                        {log.status}
+                      </Badge>
+                    </div>
+
+                    {log.body?.txCode && (
+                      <div className="text-sm bg-muted p-2 rounded">
+                        <strong>TX Code:</strong> <span className="font-mono">{log.body.txCode}</span>
+                        {log.body.externalReferentId && (
+                          <>
+                            <br />
+                            <strong>External Ref:</strong>{" "}
+                            <span className="font-mono">{log.body.externalReferentId}</span>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {log.error && (
+                      <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/20 p-2 rounded">
+                        <strong>Error:</strong> {log.error}
+                      </div>
+                    )}
+
+                    {log.nextAction && (
+                      <div className="text-sm text-blue-600 bg-blue-50 dark:bg-blue-950/20 p-2 rounded">
+                        <strong>Acción:</strong> {log.nextAction}
+                      </div>
+                    )}
+
+                    {log.body && (
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" size="sm" className="text-xs">
+                            Ver Detalles Completos <ChevronDown className="w-3 h-3 ml-1" />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="text-sm mt-2">
+                            <div className="font-medium mb-1">Body:</div>
+                            <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                              {JSON.stringify(log.body, null, 2)}
+                            </pre>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+
+                    <Collapsible>
+                      <CollapsibleTrigger asChild>
+                        <Button variant="ghost" size="sm" className="text-xs">
+                          Ver Headers <ChevronDown className="w-3 h-3 ml-1" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="text-sm mt-2">
+                          <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                            {JSON.stringify(log.headers, null, 2)}
+                          </pre>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  )
+
   return (
     <div className="min-h-screen bg-background">
       {/* Barra superior compacta */}
@@ -1227,26 +1380,44 @@ export default function PaymentClient() {
           // Pantalla de configuración en pantalla completa
           renderConfigScreen()
         ) : (
-          // Layout de dos columnas para las demás pantallas
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-120px)]">
-            {/* Columna izquierda - Logs de Webhook */}
-            <div className="order-2 lg:order-1">{renderWebhookLogsPanel()}</div>
-
-            {/* Columna derecha - Formulario */}
-            <div className="order-1 lg:order-2 flex items-start">
-              <div className="w-full">
-                {currentScreen === "qr-input" && renderQRInputScreen()}
-                {currentScreen === "waiting-webhook" && renderWaitingWebhookScreen()}
-                {currentScreen === "amount-input" && renderAmountInputScreen()}
-                {currentScreen === "confirmation" && renderConfirmationScreen()}
-                {currentScreen === "processing" && renderProcessingScreen()}
-                {currentScreen === "success" && renderSuccessScreen()}
-                {currentScreen === "cancelled" && renderCancelledScreen()}
-              </div>
+          // Layout centrado de una sola columna
+          <div className="flex justify-center">
+            <div className="w-full max-w-2xl">
+              {currentScreen === "qr-input" && renderQRInputScreen()}
+              {currentScreen === "waiting-webhook" && renderWaitingWebhookScreen()}
+              {currentScreen === "amount-input" && renderAmountInputScreen()}
+              {currentScreen === "confirmation" && renderConfirmationScreen()}
+              {currentScreen === "processing" && renderProcessingScreen()}
+              {currentScreen === "success" && renderSuccessScreen()}
+              {currentScreen === "cancelled" && renderCancelledScreen()}
             </div>
           </div>
         )}
       </div>
+
+      {/* Botón flotante para logs de webhook */}
+      {currentScreen !== "config" && (
+        <Button
+          onClick={() => setShowWebhookModal(true)}
+          className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-40"
+          size="lg"
+        >
+          <div className="flex flex-col items-center">
+            <Code2 className="h-5 w-5" />
+            {webhookLogs.length > 0 && (
+              <Badge
+                variant="secondary"
+                className="absolute -top-2 -right-2 h-6 w-6 p-0 flex items-center justify-center text-xs bg-blue-500 text-white border-2 border-white"
+              >
+                {webhookLogs.length}
+              </Badge>
+            )}
+          </div>
+        </Button>
+      )}
+
+      {/* Modal de Logs de Webhook */}
+      {renderWebhookLogsModal()}
     </div>
   )
 }
