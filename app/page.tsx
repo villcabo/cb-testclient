@@ -802,10 +802,7 @@ export default function PaymentClient() {
           </div>
 
           <div className="flex gap-3">
-            <Button onClick={() => setCurrentScreen("config")} variant="outline" className="flex-1">
-              Configuración
-            </Button>
-            <Button onClick={previewPayment} className="flex-1" disabled={!qrCode.trim() || loading}>
+            <Button onClick={previewPayment} className="w-full" disabled={!qrCode.trim() || loading}>
               {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Procesar QR
             </Button>
@@ -1367,9 +1364,14 @@ export default function PaymentClient() {
       <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
         <div className="container mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold">Cliente de Pruebas</h1>
-              <p className="text-xs text-muted-foreground">API de pagos cross-border</p>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center">
+                <CreditCard className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold">Cliente de Pruebas</h1>
+                <p className="text-xs text-muted-foreground">API de pagos cross-border</p>
+              </div>
             </div>
           </div>
         </div>
@@ -1395,25 +1397,38 @@ export default function PaymentClient() {
         )}
       </div>
 
-      {/* Botón flotante para logs de webhook */}
+      {/* Botones flotantes */}
       {currentScreen !== "config" && (
-        <Button
-          onClick={() => setShowWebhookModal(true)}
-          className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-40"
-          size="lg"
-        >
-          <div className="flex flex-col items-center">
-            <Code2 className="h-5 w-5" />
-            {webhookLogs.length > 0 && (
-              <Badge
-                variant="secondary"
-                className="absolute -top-2 -right-2 h-6 w-6 p-0 flex items-center justify-center text-xs bg-blue-500 text-white border-2 border-white"
-              >
-                {webhookLogs.length}
-              </Badge>
-            )}
-          </div>
-        </Button>
+        <>
+          {/* Botón flotante para configuración */}
+          <Button
+            onClick={() => setCurrentScreen("config")}
+            className="fixed bottom-6 left-6 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-40"
+            variant="outline"
+            size="lg"
+          >
+            <Settings className="h-5 w-5" />
+          </Button>
+
+          {/* Botón flotante para logs de webhook */}
+          <Button
+            onClick={() => setShowWebhookModal(true)}
+            className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-40"
+            size="lg"
+          >
+            <div className="flex flex-col items-center">
+              <Code2 className="h-5 w-5" />
+              {webhookLogs.length > 0 && (
+                <Badge
+                  variant="secondary"
+                  className="absolute -top-2 -right-2 h-6 w-6 p-0 flex items-center justify-center text-xs bg-blue-500 text-white border-2 border-white"
+                >
+                  {webhookLogs.length}
+                </Badge>
+              )}
+            </div>
+          </Button>
+        </>
       )}
 
       {/* Modal de Logs de Webhook */}
