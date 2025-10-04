@@ -24,6 +24,7 @@ import {
   Code2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { createApiUrl } from "@/lib/api-utils"
 
 type PaymentStatus = "idle" | "preview" | "waiting_amount" | "ready_to_confirm" | "processing" | "completed" | "cancelled" | "error"
 
@@ -169,7 +170,7 @@ export default function PaymentClient() {
     const pollWebhooks = async () => {
       try {
         // Usar solo txCode en lugar de clientId + txCode
-        const response = await fetch(`/api/webhook-logs?txCode=${currentTxCode}`)
+        const response = await fetch(createApiUrl(`/api/webhook-logs?txCode=${currentTxCode}`))
 
         if (!response.ok) {
           console.error(`[Polling] Error: HTTP ${response.status}`)
@@ -308,7 +309,7 @@ export default function PaymentClient() {
         status: "WAITING_AMOUNT"
       }
 
-      const response = await fetch("/api/webhook", {
+      const response = await fetch(createApiUrl("/api/webhook"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -374,7 +375,7 @@ export default function PaymentClient() {
     try {
       console.log("[v0] Requesting token...")
 
-      const response = await fetch("/api/auth/token", {
+      const response = await fetch(createApiUrl("/api/auth/token"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey, baseUrl: apiBaseUrl }),
@@ -427,7 +428,7 @@ export default function PaymentClient() {
 
       console.log("[v0] Sending preview request:", requestBody)
 
-      const response = await fetch("/api/payments/preview", {
+      const response = await fetch(createApiUrl("/api/payments/preview"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -475,7 +476,7 @@ export default function PaymentClient() {
     try {
       setLoading(true)
 
-      const response = await fetch("/api/payments/preview", {
+      const response = await fetch(createApiUrl("/api/payments/preview"), {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -516,7 +517,7 @@ export default function PaymentClient() {
       setLoading(true)
       setStatus("processing")
 
-      const response = await fetch("/api/payments/confirm", {
+      const response = await fetch(createApiUrl("/api/payments/confirm"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -553,7 +554,7 @@ export default function PaymentClient() {
     try {
       setLoading(true)
 
-      const response = await fetch("/api/payments/confirm", {
+      const response = await fetch(createApiUrl("/api/payments/confirm"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
