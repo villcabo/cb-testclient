@@ -20,14 +20,27 @@ class WebhookStore {
 
   // Almacenar webhook por txCode
   save(webhook: Omit<WebhookData, 'timestamp' | 'read'>): void {
+    // Asegurarse de que los campos requeridos estén presentes
+    const requiredFields: (keyof WebhookData)[] = ['type', 'txCode', 'externalReferentId', 'status'];
+    const missingFields = requiredFields.filter(field => !(field in webhook));
+    
+    if (missingFields.length > 0) {
+      console.error(`[WebhookStore] Error: Missing required fields: ${missingFields.join(', ')}`);
+      return;
+    }
+
     const webhookWithTimestamp: WebhookData = {
-      ...webhook,
+      type: webhook.type,
+      txCode: webhook.txCode,
+      externalReferentId: webhook.externalReferentId,
+      status: webhook.status,
+      ...webhook, // Esto sobrescribirá los campos anteriores si están presentes en webhook
       timestamp: Date.now(),
       read: false // Marcar como no leído por defecto
     };
 
     this.webhookMap.set(webhook.txCode, webhookWithTimestamp);
-    console.log(`[WebhookStore] Stored webhook for txCode: ${webhook.txCode} (unread)`);
+    console.log(`[WebhookStore] Stored webhook for txCode: ${webhook.txCode} (unread)`, webhookWithTimestamp);
   }
 
   // Obtener webhook por txCode (solo no leídos)
@@ -95,6 +108,12 @@ class WebhookStore {
   // Obtener todos los webhooks (para debugging)
   getAll(): WebhookData[] {
     return Array.from(this.webhookMap.values());
+  }
+
+  // Limpiar todos los webhooks
+  clearAll(): void {
+    this.webhookMap.clear();
+    console.log('[WebhookStore] Cleared all webhooks');
   }
 
   // Limpiar webhooks expirados

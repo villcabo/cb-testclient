@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,6 +22,11 @@ import {
   Eye,
   X,
   Code2,
+  ListTree,
+  RefreshCw,
+  Copy,
+  ArrowLeft,
+  Check,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { createApiUrl } from "@/lib/api-utils"
@@ -111,6 +116,8 @@ export default function PaymentClient() {
   const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([])
   const [showWebhookLogs, setShowWebhookLogs] = useState(false) // Cambiar a false para ocultar por defecto
   const [showWebhookModal, setShowWebhookModal] = useState(false) // Estado para el modal de logs
+  const [showAllWebhooksModal, setShowAllWebhooksModal] = useState(false) // Estado para el modal de todos los webhooks
+  const [allWebhooks, setAllWebhooks] = useState<any[]>([]) // Estado para almacenar todos los webhooks
   const [isPolling, setIsPolling] = useState(false)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const { toast } = useToast()
@@ -170,7 +177,7 @@ export default function PaymentClient() {
     const pollWebhooks = async () => {
       try {
         // Usar solo txCode en lugar de clientId + txCode
-        const response = await fetch(createApiUrl(`/api/webhook-logs?txCode=${currentTxCode}`))
+        const response = await fetch(createApiUrl(`/api/webhook/logs?txCode=${currentTxCode}`))
 
         if (!response.ok) {
           console.error(`[Polling] Error: HTTP ${response.status}`)
@@ -278,6 +285,89 @@ export default function PaymentClient() {
       }
     }
   }, [currentTxCode, isPolling]) // Removed clientId dependency
+
+  // Obtener todos los webhooks del servidor
+  const fetchAllWebhooks = useCallback(async () => {
+    try {
+      const response = await fetch('/api/webhook/logs', {
+        method: 'GET',
+        cache: 'no-store',
+        next: { revalidate: 0 }
+      });
+      
+      if (!response.ok) throw new Error('Failed to fetch webhooks');
+      
+      const data = await response.json();
+      if (data.success) {
+        setAllWebhooks(data.webhooks || []);
+      }
+    } catch (error) {
+      console.error('Error fetching all webhooks:', error);
+    }
+  }, []);
+
+  // Limpiar todos los webhooks
+  const clearAllWebhooks = useCallback(async () => {
+    try {
+      const response = await fetch('/api/webhook/logs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'clear_all'
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to clear webhooks');
+      }
+      
+      setAllWebhooks([]);
+      console.log('All webhooks cleared successfully');
+      
+      toast({
+        title: "Éxito",
+        description: data.message || "Todos los webhooks han sido eliminados",
+      });
+    } catch (error) {
+      console.error('Error clearing webhooks:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Error al limpiar los webhooks',
+        variant: "destructive",
+      });
+    }
+  }, [toast]);
+
+  // Referencia para el intervalo de actualización
+  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Iniciar/Detener la actualización automática
+  useEffect(() => {
+    if (showAllWebhooksModal) {
+      // Iniciar actualización automática cada segundo
+      refreshIntervalRef.current = setInterval(fetchAllWebhooks, 1000);
+      
+      // Cargar datos iniciales
+      fetchAllWebhooks();
+      
+      // Limpiar intervalo al desmontar o cerrar el modal
+      return () => {
+        if (refreshIntervalRef.current) {
+          clearInterval(refreshIntervalRef.current);
+          refreshIntervalRef.current = null;
+        }
+      };
+    }
+  }, [showAllWebhooksModal, fetchAllWebhooks]);
+
+  // Abrir modal de todos los webhooks
+  const handleOpenAllWebhooks = () => {
+    setShowAllWebhooksModal(true);
+  };
 
   const saveWebhookLog = (log: WebhookLog) => {
     const updatedLogs = [log, ...webhookLogs].slice(0, 50) // Keep only last 50 logs
@@ -1411,11 +1501,13 @@ export default function PaymentClient() {
             <Settings className="h-5 w-5" />
           </Button>
 
-          {/* Botón flotante para logs de webhook */}
+          {/* Botón flotante para logs de webhook de la sesión actual */}
           <Button
             onClick={() => setShowWebhookModal(true)}
-            className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-40"
+            className="fixed bottom-6 right-28 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-40"
             size="lg"
+            variant="outline"
+            title="Ver logs de webhook de esta sesión"
           >
             <div className="flex flex-col items-center">
               <Code2 className="h-5 w-5" />
@@ -1429,11 +1521,150 @@ export default function PaymentClient() {
               )}
             </div>
           </Button>
+
+          {/* Botón flotante para todos los webhooks */}
+          <Button
+            onClick={handleOpenAllWebhooks}
+            className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg hover:shadow-xl transition-all duration-200 z-40"
+            size="lg"
+            title="Ver todos los webhooks recibidos"
+          >
+            <div className="flex flex-col items-center">
+              <ListTree className="h-5 w-5" />
+              {allWebhooks.length > 0 && (
+                <Badge
+                  variant="secondary"
+                  className="absolute -top-2 -right-2 h-6 w-6 p-0 flex items-center justify-center text-xs bg-purple-500 text-white border-2 border-white"
+                >
+                  {allWebhooks.length}
+                </Badge>
+              )}
+            </div>
+          </Button>
         </>
       )}
 
       {/* Modal de Logs de Webhook */}
       {renderWebhookLogsModal()}
+
+      {/* Modal de Todos los Webhooks */}
+      {showAllWebhooksModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-background border rounded-lg shadow-lg w-full max-w-5xl h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-purple-500/10 rounded-lg flex items-center justify-center">
+                  <ListTree className="w-5 h-5 text-purple-500" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold">Todos los Webhooks</h2>
+                  <p className="text-sm text-muted-foreground">{allWebhooks.length} webhooks registrados</p>
+                  <Badge variant="secondary" className="text-sm">
+                    <span>{(location.protocol || 'http:') + '//' + location.host + location.pathname}api/webhook</span>
+                  </Badge>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={clearAllWebhooks}
+                  className="h-8 text-xs gap-1"
+                  disabled={allWebhooks.length === 0}
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Limpiar
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAllWebhooksModal(false)}
+                  className="h-8 w-8 p-0"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-hidden p-4">
+              {allWebhooks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+                  <ListTree className="w-12 h-12 mb-4 opacity-50" />
+                  <p className="text-lg font-medium">No hay webhooks registrados</p>
+                  <p className="text-sm">Los webhooks aparecerán aquí automáticamente</p>
+                </div>
+              ) : (
+                <div className="space-y-3 h-full overflow-y-auto pr-2">
+                  {allWebhooks.map((webhook, index) => (
+                    <div key={`${webhook.txCode}-${index}`} className="border rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant="outline" className="text-sm bg-blue-100">
+                            <span className="font-mono">{webhook.txCode}</span>
+                          </Badge>
+                          <Badge hidden={webhook.txCode}
+                            variant="outline" 
+                            className={`text-xs ${
+                              webhook.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                              webhook.status === 'CANCELLED' ? 'bg-red-100 text-red-800' :
+                              'bg-blue-100 text-blue-800'
+                            }`}
+                          >
+                            {webhook.status || 'UNKNOWN'}
+                          </Badge>
+                          <Badge hidden={webhook.type} variant="secondary" className="text-xs">
+                            {webhook.type || 'UNKNOWN'}
+                          </Badge>
+                          <span className="text-sm font-mono">
+                            {new Date(webhook.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          {webhook.read ? 'Leído' : 'No leído'}
+                        </Badge>
+                      </div>
+
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" size="sm" className="text-xs">
+                            Ver Datos Originales <ChevronDown className="w-3 h-3 ml-1" />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="text-sm mt-2 space-y-2">
+                            <div>
+                              <div className="text-xs font-medium mb-1">Datos del Webhook:</div>
+                              <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                {JSON.stringify({
+                                  // Incluir cualquier otro campo adicional
+                                  ...Object.fromEntries(
+                                    Object.entries(webhook)
+                                      .filter(([key]) => !['type', 'txCode', 'externalReferentId', 'status', 'timestamp', 'read'].includes(key))
+                                  ),
+                                  timestamp: new Date(webhook.timestamp).toISOString(),
+                                  read: webhook.read,
+                                }, null, 2)}
+                              </pre>
+                            </div>
+                            {webhook.body && (
+                              <div>
+                                <div className="text-xs font-medium mb-1">Cuerpo de la petición:</div>
+                                <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
+                                  {JSON.stringify(webhook.body, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

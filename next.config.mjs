@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
-const isGithubPages = process.env.GITHUB_PAGES === true;
+// const isGithubPages = process.env.GITHUB_PAGES === 'true';
+const isGithubPages = true;
 const nextConfig = {
   output: 'standalone',
   basePath: isGithubPages ? '/cb-testclient' : '',

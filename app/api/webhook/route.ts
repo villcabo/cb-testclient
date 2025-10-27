@@ -7,30 +7,28 @@ export async function POST(request: NextRequest) {
 
     console.log("[Webhook] Received webhook:", JSON.stringify(body, null, 2))
 
-    // Validar que tenga txCode (campo requerido)
+    // Generar un ID único si no se proporciona txCode
+    const txCode = body.txCode || `webhook-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    
     if (!body.txCode) {
-      console.error("[Webhook] Missing txCode in webhook payload")
-      return NextResponse.json(
-        { error: "Missing txCode in webhook payload" },
-        { status: 400 }
-      )
+      console.warn("[Webhook] No se proporcionó txCode, generando uno automático:", txCode);
     }
 
-    // Almacenar el webhook usando txCode como identificador único
+    // Almacenar el webhook
     webhookStore.save({
       type: body.type || "UNKNOWN",
-      txCode: body.txCode,
+      txCode: txCode,
       externalReferentId: body.externalReferentId || "",
       status: body.status || "UNKNOWN",
       ...body // Incluir cualquier campo adicional
     })
 
-    console.log(`[Webhook] Successfully stored webhook for txCode: ${body.txCode}`)
+    console.log(`[Webhook] Successfully stored webhook for txCode: ${txCode}`)
 
     // Responder al sistema externo
     return NextResponse.json({
       success: true,
-      txCode: body.txCode,
+      txCode: txCode,
       message: "Webhook received and stored successfully"
     })
 
