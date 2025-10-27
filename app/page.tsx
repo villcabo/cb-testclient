@@ -1637,10 +1637,7 @@ export default function PaymentClient() {
                               <pre className="bg-muted p-2 rounded text-xs overflow-x-auto">
                                 {JSON.stringify({
                                   // Incluir cualquier otro campo adicional
-                                  ...Object.fromEntries(
-                                    Object.entries(webhook)
-                                      .filter(([key]) => !['type', 'txCode', 'externalReferentId', 'status', 'timestamp', 'read'].includes(key))
-                                  ),
+                                  ...Object.fromEntries(Object.entries(webhook)),
                                   timestamp: new Date(webhook.timestamp).toISOString(),
                                   read: webhook.read,
                                 }, null, 2)}
