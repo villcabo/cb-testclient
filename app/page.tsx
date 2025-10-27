@@ -289,7 +289,7 @@ export default function PaymentClient() {
   // Obtener todos los webhooks del servidor
   const fetchAllWebhooks = useCallback(async () => {
     try {
-      const response = await fetch('/api/webhook/logs', {
+      const response = await fetch(createApiUrl('/api/webhook/logs'), {
         method: 'GET',
         cache: 'no-store',
         next: { revalidate: 0 }
@@ -309,7 +309,7 @@ export default function PaymentClient() {
   // Limpiar todos los webhooks
   const clearAllWebhooks = useCallback(async () => {
     try {
-      const response = await fetch('/api/webhook/logs', {
+      const response = await fetch(createApiUrl('/api/webhook/logs'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
