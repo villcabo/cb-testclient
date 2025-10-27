@@ -1595,7 +1595,9 @@ export default function PaymentClient() {
                 </div>
               ) : (
                 <div className="space-y-3 h-full overflow-y-auto pr-2">
-                  {allWebhooks.map((webhook, index) => (
+                  {allWebhooks
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                    .map((webhook, index) => (
                     <div key={`${webhook.txCode}-${index}`} className="border rounded-lg p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 flex-wrap">
