@@ -1560,7 +1560,7 @@ export default function PaymentClient() {
                   <h2 className="text-lg font-semibold">Todos los Webhooks</h2>
                   <p className="text-sm text-muted-foreground">{allWebhooks.length} webhooks registrados</p>
                   <Badge variant="secondary" className="text-sm">
-                    <span>{(location.protocol || 'http:') + '//' + location.host + location.pathname}api/webhook</span>
+                    <span>{(location.protocol || 'http:') + '//' + location.host + (location.pathname == '/' ? '' : location.pathname)}/api/webhook</span>
                   </Badge>
                 </div>
               </div>
